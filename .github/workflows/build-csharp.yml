@@ -1,0 +1,57 @@
+name: Build C# OPC DA Agent
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup MSBuild path
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Restore NuGet packages
+      run: nuget restore csharp_agent/OPC_DA_Agent.csproj
+      
+    - name: Build Debug
+      run: |
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Debug /p:Platform="Any CPU" /v:minimal
+        
+    - name: Build Release
+      run: |
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+        
+    - name: Upload Debug artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: OPC_DA_Agent_Debug
+        path: csharp_agent/bin/Debug/
+        retention-days: 30
+        
+    - name: Upload Release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: OPC_DA_Agent_Release
+        path: csharp_agent/bin/Release/
+        retention-days: 90
+        
+    - name: Create Release Archive
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        Compress-Archive -Path csharp_agent\bin\Release\* -DestinationPath OPC_DA_Agent_Windows.zip
+        
+    - name: Upload Release Archive
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: OPC_DA_Agent_Windows
+        path: OPC_DA_Agent_Windows.zip
+        retention-days: 90
