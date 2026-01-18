@@ -1,0 +1,45 @@
+# 忽略文件
+bin/
+bin/Debug/
+bin/Release/
+*.dll
+*.pdb
+*.obj
+*.exe
+*.exe~
+
+# Go
+*.sum
+*.test
+*.out
+go.work
+
+# C#
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (keep examples)
+collector.ini
+config.json
+tags.json
+transform.json
+!*.example
+!*.sample
