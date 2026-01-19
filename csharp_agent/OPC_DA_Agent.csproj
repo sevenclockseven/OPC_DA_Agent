@@ -51,13 +51,38 @@
   </ItemGroup>
 
   <ItemGroup>
+    <COMReference Include="OPC.Automation">
+      <Guid>3B1C7C5D-7745-4E1B-9D3B-1E1F5E1F5E1F</Guid>
+      <VersionMajor>1</VersionMajor>
+      <VersionMinor>0</VersionMinor>
+      <Lcid>0</Lcid>
+      <WrapperTool>tlbimp</WrapperTool>
+      <Isolated>False</Isolated>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </COMReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <COMReference Include="OPCDA">
+      <Guid>3B1C7C5D-7745-4E1B-9D3B-1E1F5E1F5E1F</Guid>
+      <VersionMajor>1</VersionMajor>
+      <VersionMinor>0</VersionMinor>
+      <Lcid>0</Lcid>
+      <WrapperTool>tlbimp</WrapperTool>
+      <Isolated>False</Isolated>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </COMReference>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua" Version="1.5.374.118" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Config.cs" />
+    <Compile Include="Logger.cs" />
+    <Compile Include="OPCBrowser.cs" />
     <Compile Include="OPCService.cs" />
     <Compile Include="HttpServer.cs" />
     <Compile Include="DataModel.cs" />

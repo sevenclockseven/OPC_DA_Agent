@@ -21,6 +21,15 @@ jobs:
     - name: Restore NuGet packages
       run: |
         msbuild csharp_agent/OPC_DA_Agent.csproj /t:Restore /p:Configuration=Debug /v:minimal
+        msbuild csharp_agent/OPC_DA_Agent.csproj /t:Restore /p:Configuration=Release /v:minimal
+
+    - name: Register OPC COM components
+      run: |
+        # Register OPC Automation COM component (requires OPC Core Components installed)
+        # This step may fail if OPC DA is not installed on the runner
+        # In that case, the build will fail with COM component not found error
+        echo "Checking for OPC COM components..."
+        reg query "HKEY_CLASSES_ROOT\OPCServer" 2>nul || echo "OPC COM components not found - OPC DA must be installed"
 
     - name: Build Debug
       run: |

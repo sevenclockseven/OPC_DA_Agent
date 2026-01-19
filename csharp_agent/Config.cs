@@ -11,14 +11,42 @@ namespace OPC_DA_Agent
     public class Config
     {
         // OPC服务器配置
-        [JsonProperty("opc_server_url")]
-        public string OpcServerUrl { get; set; } = "opcda://localhost/OPCServer.WinCC";
+        [JsonProperty("opc_server_prog_id")]
+        public string OpcServerProgId { get; set; } = "OPCServer.WinCC";
 
         [JsonProperty("opc_username")]
         public string OpcUsername { get; set; }
 
         [JsonProperty("opc_password")]
         public string OpcPassword { get; set; }
+
+        // Legacy property for backward compatibility
+        [JsonProperty("opc_server_url")]
+        public string OpcServerUrl
+        {
+            get => OpcServerProgId;
+            set
+            {
+                if (!string.IsNullOrEmpty(value))
+                {
+                    // Convert opcda:// URL to ProgID
+                    if (value.StartsWith("opcda://"))
+                    {
+                        // Extract ProgID from opcda:// URL
+                        // opcda://localhost/OPCServer.WinCC -> OPCServer.WinCC
+                        var parts = value.Split('/');
+                        if (parts.Length > 0)
+                        {
+                            OpcServerProgId = parts[parts.Length - 1];
+                        }
+                    }
+                    else
+                    {
+                        OpcServerProgId = value;
+                    }
+                }
+            }
+        }
 
         // HTTP服务器配置
         [JsonProperty("http_port")]
@@ -109,9 +137,9 @@ namespace OPC_DA_Agent
         {
             errors = new List<string>();
 
-            if (string.IsNullOrWhiteSpace(OpcServerUrl))
+            if (string.IsNullOrWhiteSpace(OpcServerProgId))
             {
-                errors.Add("OPC服务器地址不能为空");
+                errors.Add("OPC服务器ProgID不能为空");
             }
 
             if (HttpPort <= 0 || HttpPort > 65535)
@@ -144,7 +172,7 @@ namespace OPC_DA_Agent
         {
             return new Config
             {
-                OpcServerUrl = "opcda://localhost/OPCServer.WinCC",
+                OpcServerProgId = "OPCServer.WinCC",
                 HttpPort = 8080,
                 UpdateInterval = 1000,
                 BatchSize = 500,
@@ -155,7 +183,7 @@ namespace OPC_DA_Agent
                 {
                     new TagConfig
                     {
-                        NodeId = "ns=2;s=Channel1.Device1.Temperature",
+                        NodeId = "Channel1.Device1.Temperature",
                         Name = "Temperature",
                         Description = "温度传感器",
                         DataType = "Double",
@@ -163,7 +191,7 @@ namespace OPC_DA_Agent
                     },
                     new TagConfig
                     {
-                        NodeId = "ns=2;s=Channel1.Device1.Pressure",
+                        NodeId = "Channel1.Device1.Pressure",
                         Name = "Pressure",
                         Description = "压力传感器",
                         DataType = "Double",

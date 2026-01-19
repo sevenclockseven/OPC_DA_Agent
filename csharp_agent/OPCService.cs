@@ -3,22 +3,20 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Opc.Ua;
-using Opc.Ua.Client;
-using Opc.Ua.Configuration;
+using OPCAutomation;
 
 namespace OPC_DA_Agent
 {
     /// <summary>
-    /// OPC数据采集服务
-    /// 支持OPC UA和OPC DA（通过OPC UA Wrapper转换）
+    /// OPC DA 数据采集服务
+    /// 使用 OPC Automation COM 接口
     /// </summary>
     public class OPCService : IDisposable
     {
-        private Session _session;
-        private Subscription _subscription;
+        private OPCServer _opcServer;
+        private OPCGroup _opcGroup;
         private List<TagConfig> _tags;
-        private Dictionary<string, DataValue> _lastValues;
+        private Dictionary<string, object> _lastValues;
         private Timer _updateTimer;
         private bool _isRunning;
         private readonly object _lock = new object();
@@ -31,76 +29,43 @@ namespace OPC_DA_Agent
         private readonly Logger _logger;
         private readonly Config _config;
 
-        public bool IsConnected => _session != null && _session.Connected;
+        public bool IsConnected => _opcServer != null && _opcServer.ServerState == (int)OPCServerState.Running;
         public int TagCount => _tags?.Count ?? 0;
         public long TotalReads => _totalReads;
         public long TotalErrors => _totalErrors;
         public DateTime StartTime => _startTime;
-        public Session Session => _session;
-
-        private OPCBrowser _browser;
-        public OPCBrowser Browser => _browser;
 
         public OPCService(Config config, Logger logger)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tags = new List<TagConfig>();
-            _lastValues = new Dictionary<string, DataValue>();
+            _lastValues = new Dictionary<string, object>();
             _startTime = DateTime.Now;
         }
 
         /// <summary>
-        /// 连接到OPC服务器
+        /// 连接到OPC DA服务器
         /// </summary>
         public async Task<bool> ConnectAsync()
         {
             try
             {
-                _logger.Info($"正在连接到OPC服务器: {_config.OpcServerUrl}");
+                _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
 
-                // 创建应用程序配置
-                var application = new ApplicationConfiguration
-                {
-                    ApplicationName = "OPC DA Agent",
-                    ApplicationType = ApplicationType.Client,
-                    SecurityConfiguration = new SecurityConfiguration
-                    {
-                        AutoAcceptUntrustedCertificates = true,
-                        RejectSHA1SignedCertificates = false,
-                        MinimumCertificateKeySize = 1024
-                    },
-                    TransportConfigurations = new TransportConfigurationCollection(),
-                    UserIdentityTokens = new UserTokenPolicyCollection()
-                };
+                // 创建OPC服务器实例
+                _opcServer = new OPCServer();
 
-                // 创建证书（如果不存在）
-                await application.Validate(ApplicationType.Client);
+                // 连接到OPC服务器（使用ProgID）
+                _opcServer.Connect(_config.OpcServerProgId);
 
-                // 连接到OPC服务器
-                var endpointDescription = CoreClientUtils.SelectEndpoint(
-                    _config.OpcServerUrl,
-                    false,
-                    15000
-                );
+                _logger.Info($"成功连接到OPC DA服务器: {_opcServer.ServerName}");
 
-                var endpointConfiguration = EndpointConfiguration.Create(application);
-                var endpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);
-
-                _session = await Session.Create(
-                    application,
-                    endpoint,
-                    false,
-                    "OPC DA Agent Session",
-                    60000,
-                    new UserIdentity(new AnonymousIdentityToken()),
-                    null
-                );
-
-                _logger.Info($"成功连接到OPC服务器: {_session.Endpoint.Server.ApplicationName}");
-
-                // 初始化浏览器
-                _browser = new OPCBrowser(_config, _logger);
+                // 创建OPC组
+                _opcGroup = _opcServer.OPCGroups.Add("OPC_DA_Agent_Group");
+                _opcGroup.UpdateRate = _config.UpdateInterval;
+                _opcGroup.IsActive = true;
+                _opcGroup.IsSubscribed = true;
 
                 // 加载标签配置
                 await LoadTagsAsync();
@@ -109,7 +74,7 @@ namespace OPC_DA_Agent
             }
             catch (Exception ex)
             {
-                _logger.Error($"连接OPC服务器失败: {ex.Message}", ex);
+                _logger.Error($"连接OPC DA服务器失败: {ex.Message}", ex);
                 _totalErrors++;
                 return false;
             }
@@ -172,7 +137,7 @@ namespace OPC_DA_Agent
 
             if (!IsConnected)
             {
-                _logger.Error("无法启动数据采集：未连接到OPC服务器");
+                _logger.Error("无法启动数据采集：未连接到OPC DA服务器");
                 return false;
             }
 
@@ -180,6 +145,34 @@ namespace OPC_DA_Agent
             {
                 _isRunning = true;
                 _startTime = DateTime.Now;
+
+                // 添加标签到组
+                if (_tags.Count > 0)
+                {
+                    var enabledTags = _tags.Where(t => t.Enabled).ToList();
+                    if (enabledTags.Count > 0)
+                    {
+                        var itemNames = enabledTags.Select(t => t.NodeId).ToArray();
+                        var itemIds = new int[itemNames.Length];
+                        var serverHandles = new int[itemNames.Length];
+                        var clientHandles = new int[itemNames.Length];
+
+                        for (int i = 0; i < itemNames.Length; i++)
+                        {
+                            clientHandles[i] = i + 1;
+                        }
+
+                        _opcGroup.OPCItems.AddItems(
+                            itemNames.Length,
+                            itemNames,
+                            clientHandles,
+                            out serverHandles,
+                            out itemIds
+                        );
+
+                        _logger.Info($"已添加 {enabledTags.Count} 个标签到OPC组");
+                    }
+                }
 
                 // 创建定时器
                 _updateTimer = new Timer(
@@ -226,7 +219,7 @@ namespace OPC_DA_Agent
                 var enabledTags = _tags.Where(t => t.Enabled).ToList();
                 if (enabledTags.Count == 0) return;
 
-                // 分批读取
+                // 批量读取
                 var batchSize = _config.BatchSize;
                 for (int i = 0; i < enabledTags.Count; i += batchSize)
                 {
@@ -250,27 +243,60 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var nodeIds = tags.Select(t => new NodeId(t.NodeId)).ToList();
-                var values = _session.ReadValues(nodeIds, out var errors);
+                var itemNames = tags.Select(t => t.NodeId).ToArray();
+                var itemIds = new int[itemNames.Length];
+                var serverHandles = new int[itemNames.Length];
+                var clientHandles = new int[itemNames.Length];
+
+                for (int i = 0; i < itemNames.Length; i++)
+                {
+                    clientHandles[i] = i + 1;
+                }
+
+                // 添加项到组
+                _opcGroup.OPCItems.AddItems(
+                    itemNames.Length,
+                    itemNames,
+                    clientHandles,
+                    out serverHandles,
+                    out itemIds
+                );
+
+                // 读取值
+                object[] values;
+                short[] qualities;
+                DateTime[] timestamps;
+                short[] errors;
+
+                _opcGroup.Read(
+                    OPCDataSource.OPC_DS_DEVICE,
+                    out values,
+                    out qualities,
+                    out timestamps,
+                    out errors
+                );
 
                 lock (_lock)
                 {
-                    for (int i = 0; i < tags.Count && i < values.Count; i++)
+                    for (int i = 0; i < tags.Count && i < values.Length; i++)
                     {
                         var tag = tags[i];
                         var value = values[i];
                         var error = errors[i];
 
-                        if (StatusCode.IsGood(error))
+                        if (error == 0) // Good
                         {
                             _lastValues[tag.NodeId] = value;
                         }
                         else
                         {
-                            _logger.Debug($"读取标签 {tag.NodeId} 失败: {error}");
+                            _logger.Debug($"读取标签 {tag.NodeId} 失败: 错误代码 {error}");
                         }
                     }
                 }
+
+                // 清理项
+                _opcGroup.OPCItems.RemoveItems(itemIds.Length, itemIds);
             }
             catch (Exception ex)
             {
@@ -292,22 +318,18 @@ namespace OPC_DA_Agent
             {
                 foreach (var tag in _tags.Where(t => t.Enabled))
                 {
-                    if (_lastValues.TryGetValue(tag.NodeId, out var dataValue) && dataValue != null)
+                    if (_lastValues.TryGetValue(tag.NodeId, out var value) && value != null)
                     {
-                        var quality = StatusCode.IsGood(dataValue.StatusCode) ? "Good" :
-                                     StatusCode.IsUncertain(dataValue.StatusCode) ? "Uncertain" : "Bad";
-
                         // 使用标签名称作为键
                         var key = tag.Name ?? tag.NodeId;
-                        data[key] = dataValue.Value;
+                        data[key] = value;
 
                         metadata[key] = new TagMetadata
                         {
                             DataType = tag.DataType,
-                            Quality = quality,
-                            Timestamp = dataValue.SourceTimestamp != DateTime.MinValue ?
-                                       dataValue.SourceTimestamp : timestamp,
-                            Status = StatusCode.ToString(dataValue.StatusCode)
+                            Quality = "Good",
+                            Timestamp = timestamp,
+                            Status = "Good"
                         };
                     }
                 }
@@ -336,19 +358,15 @@ namespace OPC_DA_Agent
             {
                 foreach (var tag in _tags.Where(t => t.Enabled))
                 {
-                    if (_lastValues.TryGetValue(tag.NodeId, out var dataValue) && dataValue != null)
+                    if (_lastValues.TryGetValue(tag.NodeId, out var value) && value != null)
                     {
-                        var quality = StatusCode.IsGood(dataValue.StatusCode) ? "Good" :
-                                     StatusCode.IsUncertain(dataValue.StatusCode) ? "Uncertain" : "Bad";
-
                         result.Add(new TagValue
                         {
                             Key = tag.Name ?? tag.NodeId,
-                            Value = dataValue.Value,
-                            Quality = quality,
-                            Timestamp = dataValue.SourceTimestamp != DateTime.MinValue ?
-                                       dataValue.SourceTimestamp : timestamp,
-                            Status = StatusCode.ToString(dataValue.StatusCode),
+                            Value = value,
+                            Quality = "Good",
+                            Timestamp = timestamp,
+                            Status = "Good",
                             DataType = tag.DataType,
                             NodeId = tag.NodeId,
                             Name = tag.Name ?? tag.NodeId
@@ -370,31 +388,63 @@ namespace OPC_DA_Agent
 
             try
             {
-                var nodes = nodeIds.Select(n => new NodeId(n)).ToList();
-                var values = _session.ReadValues(nodes, out var errors);
+                var itemNames = nodeIds.ToArray();
+                var itemIds = new int[itemNames.Length];
+                var serverHandles = new int[itemNames.Length];
+                var clientHandles = new int[itemNames.Length];
+
+                for (int i = 0; i < itemNames.Length; i++)
+                {
+                    clientHandles[i] = i + 1;
+                }
+
+                // 添加项到组
+                _opcGroup.OPCItems.AddItems(
+                    itemNames.Length,
+                    itemNames,
+                    clientHandles,
+                    out serverHandles,
+                    out itemIds
+                );
+
+                // 读取值
+                object[] values;
+                short[] qualities;
+                DateTime[] timestamps;
+                short[] errors;
+
+                _opcGroup.Read(
+                    OPCDataSource.OPC_DS_DEVICE,
+                    out values,
+                    out qualities,
+                    out timestamps,
+                    out errors
+                );
+
                 var timestamp = DateTime.Now;
 
-                for (int i = 0; i < nodeIds.Count && i < values.Count; i++)
+                for (int i = 0; i < nodeIds.Count && i < values.Length; i++)
                 {
                     var value = values[i];
                     var error = errors[i];
 
-                    var quality = StatusCode.IsGood(error) ? "Good" :
-                                 StatusCode.IsUncertain(error) ? "Uncertain" : "Bad";
+                    var quality = error == 0 ? "Good" : "Bad";
 
                     result.Add(new TagValue
                     {
                         NodeId = nodeIds[i],
                         Name = nodeIds[i],
-                        Value = value.Value,
+                        Value = value,
                         Quality = quality,
-                        Timestamp = value.SourceTimestamp != DateTime.MinValue ?
-                                   value.SourceTimestamp : timestamp,
-                        Status = StatusCode.ToString(error)
+                        Timestamp = timestamp,
+                        Status = error == 0 ? "Good" : $"Error: {error}"
                     });
                 }
 
                 _totalReads++;
+
+                // 清理项
+                _opcGroup.OPCItems.RemoveItems(itemIds.Length, itemIds);
             }
             catch (Exception ex)
             {
@@ -415,7 +465,7 @@ namespace OPC_DA_Agent
             return new SystemStatus
             {
                 OpcConnected = IsConnected,
-                OpcServerUrl = _config.OpcServerUrl,
+                OpcServerUrl = _config.OpcServerProgId,
                 TagCount = _tags.Count,
                 EnabledTagCount = _tags.Count(t => t.Enabled),
                 UptimeSeconds = (DateTime.Now - _startTime).TotalSeconds,
@@ -459,11 +509,9 @@ namespace OPC_DA_Agent
         /// </summary>
         public async Task<List<OPCNode>> BrowseRootAsync()
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return await _browser.BrowseRootAsync();
+            // OPC DA browse is not supported in this implementation
+            // Use OPC UA for browsing or implement OPC DA browse manually
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
@@ -471,11 +519,8 @@ namespace OPC_DA_Agent
         /// </summary>
         public async Task<List<OPCNode>> BrowseNodeAsync(string nodeId, int depth = 1)
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return await _browser.BrowseNodeAsync(nodeId, depth);
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
@@ -483,11 +528,8 @@ namespace OPC_DA_Agent
         /// </summary>
         public async Task<OPCNode> BrowseTreeAsync(string nodeId, int maxDepth = 3)
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return await _browser.BrowseTreeAsync(nodeId, maxDepth);
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
@@ -495,11 +537,8 @@ namespace OPC_DA_Agent
         /// </summary>
         public async Task<List<OPCNode>> SearchNodesAsync(string searchTerm, int maxResults = 1000)
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return await _browser.SearchNodesAsync(searchTerm, maxResults);
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
@@ -507,11 +546,8 @@ namespace OPC_DA_Agent
         /// </summary>
         public async Task<OPCNodeDetail> GetNodeDetailAsync(string nodeId)
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return await _browser.GetNodeDetailAsync(nodeId);
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
@@ -519,23 +555,41 @@ namespace OPC_DA_Agent
         /// </summary>
         public async Task<List<TagConfig>> ExportAllVariablesAsync(int maxDepth = 3)
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return await _browser.ExportAllVariablesAsync(maxDepth);
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         public void Dispose()
         {
             Stop();
 
-            _browser?.Dispose();
-            _subscription?.Dispose();
-            _session?.Disconnect();
-            _session?.Dispose();
+            try
+            {
+                _opcGroup?.OPCItems?.RemoveAll();
+                _opcServer?.OPCGroups?.RemoveAll();
+                _opcServer?.Disconnect();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"清理OPC资源失败: {ex.Message}", ex);
+            }
+
+            _opcGroup = null;
+            _opcServer = null;
 
             _logger.Info("OPC服务已释放");
         }
+    }
+
+    /// <summary>
+    /// OPC服务器状态枚举
+    /// </summary>
+    public enum OPCServerState
+    {
+        Running = 1,
+        Failed = 2,
+        NoConfig = 3,
+        Suspended = 4,
+        Test = 5
     }
 }
