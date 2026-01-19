@@ -46,34 +46,48 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 连接到OPC DA服务器
         /// </summary>
-        public async Task<bool> ConnectAsync()
+public async Task<bool> ConnectAsync()
+{
+    try
+    {
+        _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
+
+        // 获取类型信息并创建实例
+        var serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
+        if (serverType == null)
         {
-            try
-            {
-                _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
+            _logger.Error($"无法获取ProgID '{_config.OpcServerProgId}' 对应的类型。");
+            return false;
+        }
 
-                // 获取类型信息并创建实例
-                var serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
-                if (serverType == null)
-                {
-                    _logger.Error($"无法获取ProgID '{_config.OpcServerProgId}' 对应的类型。请确认该OPC服务器已安装并注册。");
-                    return false;
-                }
+        _logger.Info($"获取到的服务器类型: {serverType.FullName}");
+        _opcServer = Activator.CreateInstance(serverType);
+        if (_opcServer == null)
+        {
+            _logger.Error($"无法创建ProgID '{_config.OpcServerProgId}' 对应的实例。");
+            return false;
+        }
 
-                _opcServer = Activator.CreateInstance(serverType);
-                if (_opcServer == null)
-                {
-                    _logger.Error($"无法创建ProgID '{_config.OpcServerProgId}' 对应的实例。");
-                    return false;
-                }
+        _logger.Info($"成功创建OPC服务器实例: {_config.OpcServerProgId}");
 
-                _logger.Info($"成功创建OPC服务器实例: {_config.OpcServerProgId}");
+        // 尝试获取 OPCGroups 属性
+        var opcGroupsProperty = _opcServer.GetType().GetProperty("OPCGroups");
+        if (opcGroupsProperty == null)
+        {
+            _logger.Error("无法获取OPCGroups属性。");
+            return false;
+        }
+        _logger.Info("成功获取OPCGroups属性。");
 
-                // 创建OPC组
-                var opcGroups = _opcServer.GetType().GetProperty("OPCGroups").GetValue(_opcServer);
-                if (opcGroups == null)
-                {
-                    _logger.Error("无法获取OPCGroups对象。");
+        var opcGroups = opcGroupsProperty.GetValue(_opcServer);
+        if (opcGroups == null)
+        {
+            _logger.Error("获取到的OPCGroups对象为null。");
+            return false;
+        }
+        _logger.Info("成功获取OPCGroups对象。");
+
+  
                     return false;
                 }
 
