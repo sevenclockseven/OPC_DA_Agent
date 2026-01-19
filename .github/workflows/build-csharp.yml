@@ -29,12 +29,12 @@ jobs:
 
     - name: Check NuGet packages
       run: |
-        if exist "csharp_agent\packages\OPC.NET.API.2.1.1" (
-          echo "OPC.NET.API package found"
-        ) else (
-          echo "OPC.NET.API package NOT found"
+        if (Test-Path "csharp_agent\packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.dll") {
+          Write-Host "OPC.NET.API package found"
+        } else {
+          Write-Host "OPC.NET.API package NOT found"
           exit 1
-        )
+        }
 
     - name: Install OPC Core Components
       run: |
