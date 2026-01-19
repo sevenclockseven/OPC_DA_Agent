@@ -18,21 +18,13 @@ jobs:
     - name: Setup MSBuild path
       uses: microsoft/setup-msbuild@v2
 
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v2
-
-    - name: Restore NuGet packages
-      run: |
-        cd csharp_agent
-        nuget restore OPC_DA_Agent.csproj -PackagesDirectory packages
-
     - name: Build Debug
       run: |
-        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Debug /p:Platform=AnyCPU /v:minimal
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Debug /p:Platform=AnyCPU /v:minimal /p:RestorePackages=true /p:RestorePackagesConfig=true
 
     - name: Build Release
       run: |
-        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=AnyCPU /v:minimal
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=AnyCPU /v:minimal /p:RestorePackages=true /p:RestorePackagesConfig=true
         
     - name: Upload Debug artifacts
       uses: actions/upload-artifact@v4
