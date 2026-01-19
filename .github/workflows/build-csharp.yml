@@ -20,11 +20,11 @@ jobs:
 
     - name: Build Debug
       run: |
-        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Debug /p:Platform="Any CPU" /v:minimal /p:RestorePackages=true
-        
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Debug /p:Platform=AnyCPU /v:minimal /p:RestorePackages=true
+
     - name: Build Release
       run: |
-        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform="Any CPU" /v:minimal /p:RestorePackages=true
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=AnyCPU /v:minimal /p:RestorePackages=true
         
     - name: Upload Debug artifacts
       uses: actions/upload-artifact@v4
