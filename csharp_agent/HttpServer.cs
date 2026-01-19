@@ -153,6 +153,7 @@ namespace OPC_DA_Agent
                 // 路由处理
                 var path = request.Url.AbsolutePath.TrimEnd('/');
                 var method = request.HttpMethod;
+                var queryString = request.Url.Query;
 
                 ApiResponse apiResponse = null;
 
@@ -425,7 +426,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var query = request.Url.ParseQueryString();
+                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
                 var nodeId = query["nodeId"];
                 var depthStr = query["depth"];
 
@@ -456,7 +457,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var query = request.Url.ParseQueryString();
+                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
                 var nodeId = query["nodeId"];
                 var maxDepthStr = query["maxDepth"];
 
@@ -487,7 +488,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var query = request.Url.ParseQueryString();
+                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
                 var searchTerm = query["q"];
                 var maxResultsStr = query["max"];
 
@@ -518,7 +519,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var query = request.Url.ParseQueryString();
+                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
                 var nodeId = query["nodeId"];
 
                 if (string.IsNullOrEmpty(nodeId))
@@ -542,7 +543,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var query = request.Url.ParseQueryString();
+                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
                 var maxDepthStr = query["maxDepth"];
 
                 int maxDepth = 3;
@@ -582,7 +583,7 @@ namespace OPC_DA_Agent
                 // 保存到文件
                 var tagsFile = _config.TagsFile ?? "tags.json";
                 var json = JsonConvert.SerializeObject(tags, Formatting.Indented);
-                await System.IO.File.WriteAllTextAsync(tagsFile, json);
+                System.IO.File.WriteAllText(tagsFile, json);
 
                 // 重新加载配置
                 await _opcService.ReloadConfig();

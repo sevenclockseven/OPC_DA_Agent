@@ -24,7 +24,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 连接到OPC服务器
         /// </summary>
-        public async Task<bool> ConnectAsync()
+        public bool Connect()
         {
             try
             {
@@ -48,7 +48,7 @@ namespace OPC_DA_Agent
         /// 浏览根节点下的所有节点
         /// 注意：OPC DA不支持标准浏览，返回空列表
         /// </summary>
-        public async Task<List<OPCNode>> BrowseRootAsync()
+        public List<OPCNode> BrowseRoot()
         {
             if (_opcServer == null)
             {
@@ -71,7 +71,7 @@ namespace OPC_DA_Agent
         /// 浏览指定节点的子节点
         /// 注意：OPC DA不支持标准浏览，返回空列表
         /// </summary>
-        public async Task<List<OPCNode>> BrowseNodeAsync(string nodeId, int depth = 1)
+        public List<OPCNode> BrowseNode(string nodeId, int depth = 1)
         {
             if (_opcServer == null)
             {
@@ -94,7 +94,7 @@ namespace OPC_DA_Agent
         /// 递归浏览节点树
         /// 注意：OPC DA不支持标准浏览，返回null
         /// </summary>
-        public async Task<OPCNode> BrowseTreeAsync(string nodeId, int maxDepth = 3, int currentDepth = 0)
+        public OPCNode BrowseTree(string nodeId, int maxDepth = 3, int currentDepth = 0)
         {
             if (_opcServer == null)
             {
@@ -117,7 +117,7 @@ namespace OPC_DA_Agent
         /// 搜索包含指定名称的节点
         /// 注意：OPC DA不支持标准搜索，返回空列表
         /// </summary>
-        public async Task<List<OPCNode>> SearchNodesAsync(string searchTerm, int maxResults = 1000)
+        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
         {
             if (_opcServer == null)
             {
@@ -140,7 +140,7 @@ namespace OPC_DA_Agent
         /// 获取节点详细信息
         /// 注意：OPC DA不支持标准节点信息，返回基本信息
         /// </summary>
-        public async Task<OPCNodeDetail> GetNodeDetailAsync(string nodeId)
+        public OPCNodeDetail GetNodeDetail(string nodeId)
         {
             if (_opcServer == null)
             {
@@ -175,7 +175,7 @@ namespace OPC_DA_Agent
         /// 导出所有变量节点到文件
         /// 注意：OPC DA不支持标准浏览，返回空列表
         /// </summary>
-        public async Task<List<TagConfig>> ExportAllVariablesAsync(int maxDepth = 3)
+        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
         {
             if (_opcServer == null)
             {

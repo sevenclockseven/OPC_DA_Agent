@@ -77,7 +77,7 @@ namespace OPC_DA_Agent
                 isSubscribedProperty.SetValue(_opcGroup, true);
 
                 // 加载标签配置
-                await LoadTagsAsync();
+                LoadTags();
 
                 return true;
             }
@@ -92,13 +92,13 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 加载标签配置
         /// </summary>
-        private async Task LoadTagsAsync()
+        private void LoadTags()
         {
             try
             {
                 if (_config.TagsFile != null && System.IO.File.Exists(_config.TagsFile))
                 {
-                    var json = await System.IO.File.ReadAllTextAsync(_config.TagsFile);
+                    var json = System.IO.File.ReadAllText(_config.TagsFile);
                     _tags = Newtonsoft.Json.JsonConvert.DeserializeObject<List<TagConfig>>(json);
                     _logger.Info($"从文件加载了 {_tags.Count} 个标签");
                 }
@@ -301,151 +301,27 @@ namespace OPC_DA_Agent
                 timestamps = (DateTime[])readParameters[3];
                 errors = (short[])readParameters[4];
 
-                lock (_lock)
-                {
-                    for (int i = 0; i < tags.Count && i < values.Length; i++)
-                    {
-                        var tag = tags[i];
-                        var value = values[i];
-                        var error = errors[i];
-
-                        if (error == 0) // Good
-                        {
-                            _lastValues[tag.NodeId] = value;
-                        }
-                        else
-                        {
-                            _logger.Debug($"读取标签 {tag.NodeId} 失败: 错误代码 {error}");
-                        }
-                    }
-                }
-
-                // 清理项
-                var removeItemsMethod = opcItems.GetType().GetMethod("RemoveItems");
-                removeItemsMethod.Invoke(opcItems, new object[] { itemIds.Length, itemIds });
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"批量读取失败: {ex.Message}", ex);
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// 获取当前所有数据（键值对格式）
-        /// </summary>
-        public BatchKeyValueResponse GetCurrentData()
-        {
-            var data = new Dictionary<string, object>();
-            var metadata = new Dictionary<string, TagMetadata>();
-            var timestamp = DateTime.Now;
-
-            lock (_lock)
-            {
-                foreach (var tag in _tags.Where(t => t.Enabled))
-                {
-                    if (_lastValues.TryGetValue(tag.NodeId, out var value) && value != null)
-                    {
-                        // 使用标签名称作为键
-                        var key = tag.Name ?? tag.NodeId;
-                        data[key] = value;
-
-                        metadata[key] = new TagMetadata
-                        {
-                            DataType = tag.DataType,
-                            Quality = "Good",
-                            Timestamp = timestamp,
-                            Status = "Good"
-                        };
-                    }
-                }
-            }
-
-            return new BatchKeyValueResponse
-            {
-                BatchId = Guid.NewGuid().ToString(),
-                Timestamp = DateTime.Now,
-                Count = data.Count,
-                Data = data,
-                Metadata = metadata,
-                ElapsedMs = 0
-            };
-        }
-
-        /// <summary>
-        /// 获取当前所有数据（列表格式，兼容旧版本）
-        /// </summary>
-        public List<TagValue> GetCurrentDataList()
-        {
-            var result = new List<TagValue>();
-            var timestamp = DateTime.Now;
-
-            lock (_lock)
-            {
-                foreach (var tag in _tags.Where(t => t.Enabled))
-                {
-                    if (_lastValues.TryGetValue(tag.NodeId, out var value) && value != null)
-                    {
-                        result.Add(new TagValue
-                        {
-                            Key = tag.Name ?? tag.NodeId,
-                            Value = value,
-                            Quality = "Good",
-                            Timestamp = timestamp,
-                            Status = "Good",
-                            DataType = tag.DataType,
-                            NodeId = tag.NodeId,
-                            Name = tag.Name ?? tag.NodeId
-                        });
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// 批量读取指定节点
-        /// </summary>
-        public async Task<List<TagValue>> ReadNodesAsync(List<string> nodeIds, int timeoutMs = 5000)
-        {
-            var result = new List<TagValue>();
-            if (!IsConnected) return result;
-
-            try
-            {
-                var itemNames = nodeIds.ToArray();
-                var itemIds = new int[itemNames.Length];
-                var serverHandles = new int[itemNames.Length];
-                var clientHandles = new int[itemNames.Length];
-
-                for (int i = 0; i < itemNames.Length; i++)
-                {
-                    clientHandles[i] = i + 1;
-                }
-
-                // 添加项到组
-                _opcGroup.OPCItems.AddItems(
-                    itemNames.Length,
-                    itemNames,
-                    clientHandles,
-                    out serverHandles,
-                    out itemIds
-                );
-
                 // 读取值
-                object[] values;
-                short[] qualities;
-                DateTime[] timestamps;
-                short[] errors;
+                object[] values = null;
+                short[] qualities = null;
+                DateTime[] timestamps = null;
+                short[] errors = null;
 
-                _opcGroup.Read(
-                    OPCDataSource.OPC_DS_DEVICE,
-                    out values,
-                    out qualities,
-                    out timestamps,
-                    out errors
-                );
+                var readMethod = _opcGroup.GetType().GetMethod("Read");
+                var readParameters = new object[] 
+                { 
+                    1, // OPC_DS_DEVICE = 1
+                    values,
+                    qualities,
+                    timestamps,
+                    errors
+                };
+                readMethod.Invoke(_opcGroup, readParameters);
+
+                values = (object[])readParameters[1];
+                qualities = (short[])readParameters[2];
+                timestamps = (DateTime[])readParameters[3];
+                errors = (short[])readParameters[4];
 
                 var timestamp = DateTime.Now;
 
@@ -507,13 +383,13 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 重新加载配置
         /// </summary>
-        public async Task<bool> ReloadConfig()
+        public bool ReloadConfig()
         {
             try
             {
                 Stop();
 
-                await LoadTagsAsync();
+                LoadTags();
 
                 if (IsConnected)
                 {
@@ -531,13 +407,25 @@ namespace OPC_DA_Agent
         }
 
         /// <summary>
-        /// 浏览OPC服务器节点
+        /// 导出所有变量节点
         /// </summary>
-        public async Task<List<OPCNode>> BrowseRootAsync()
+        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
         {
-            // OPC DA browse is not supported in this implementation
-            // Use OPC UA for browsing or implement OPC DA browse manually
-            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+            if (_browser == null)
+            {
+                throw new InvalidOperationException("浏览器未初始化");
+            }
+            return _browser.ExportAllVariables(maxDepth);
+        }
+            return _browser.GetNodeDetail(nodeId);
+        }
+            return _browser.SearchNodes(searchTerm, maxResults);
+        }
+            return _browser.BrowseTree(nodeId, maxDepth);
+        }
+            return _browser.BrowseNode(nodeId, depth);
+        }
+            return _browser.BrowseRoot();
         }
 
         /// <summary>

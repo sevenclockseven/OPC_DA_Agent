@@ -51,16 +51,29 @@ namespace OPC_DA_Agent
 
         private LogLevel ParseLogLevel(string level)
         {
-            return level?.ToLower() switch
+            if (string.IsNullOrEmpty(level))
             {
-                "debug" => LogLevel.Debug,
-                "info" => LogLevel.Info,
-                "warn" => LogLevel.Warn,
-                "warning" => LogLevel.Warn,
-                "error" => LogLevel.Error,
-                "fatal" => LogLevel.Fatal,
-                _ => LogLevel.Info
-            };
+                return LogLevel.Info;
+            }
+
+            var lowerLevel = level.ToLower();
+            switch (lowerLevel)
+            {
+                case "debug":
+                    return LogLevel.Debug;
+                case "info":
+                    return LogLevel.Info;
+                case "warn":
+                    return LogLevel.Warn;
+                case "warning":
+                    return LogLevel.Warn;
+                case "error":
+                    return LogLevel.Error;
+                case "fatal":
+                    return LogLevel.Fatal;
+                default:
+                    return LogLevel.Info;
+            }
         }
 
         public void Debug(string message)

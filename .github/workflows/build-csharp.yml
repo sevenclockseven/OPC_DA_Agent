@@ -29,17 +29,17 @@ jobs:
         reg query "HKEY_CLASSES_ROOT\OPCServer" 2>nul && echo "OPC COM components found" || echo "OPC COM components not found - OPC DA must be installed on the runner"
         echo "Note: OPC DA COM components are required for runtime, but can be skipped for build verification"
         echo "Build will fail if OPC DA COM components are not available"
-      continue-on-error: true
+      continue-on-error: false
 
     - name: Build Debug
       run: |
         msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Debug /p:Platform=AnyCPU /v:minimal
-      continue-on-error: true
+      continue-on-error: false
 
     - name: Build Release
       run: |
         msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=AnyCPU /v:minimal
-      continue-on-error: true
+      continue-on-error: false
         
     - name: Upload Debug artifacts
       uses: actions/upload-artifact@v4
@@ -47,7 +47,6 @@ jobs:
         name: OPC_DA_Agent_Debug
         path: csharp_agent/bin/Debug/
         retention-days: 30
-      continue-on-error: true
         
     - name: Upload Release artifacts
       uses: actions/upload-artifact@v4
@@ -55,13 +54,11 @@ jobs:
         name: OPC_DA_Agent_Release
         path: csharp_agent/bin/Release/
         retention-days: 90
-      continue-on-error: true
         
     - name: Create Release Archive
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       run: |
         Compress-Archive -Path csharp_agent\bin\Release\* -DestinationPath OPC_DA_Agent_Windows.zip
-      continue-on-error: true
         
     - name: Upload Release Archive
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -70,4 +67,3 @@ jobs:
         name: OPC_DA_Agent_Windows
         path: OPC_DA_Agent_Windows.zip
         retention-days: 90
-      continue-on-error: true
