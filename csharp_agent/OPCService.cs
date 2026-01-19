@@ -406,6 +406,64 @@ namespace OPC_DA_Agent
             }
         }
 
+        public void Dispose()
+        {
+            Stop();
+
+            try
+            {
+                if (_opcGroup != null)
+                {
+                    var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
+                    var removeAllMethod = opcItems.GetType().GetMethod("RemoveAll");
+                    removeAllMethod.Invoke(opcItems, null);
+                }
+
+                if (_opcServer != null)
+                {
+                    var opcGroups = _opcServer.GetType().GetProperty("OPCGroups").GetValue(_opcServer);
+                    var removeAllMethod = opcGroups.GetType().GetMethod("RemoveAll");
+                    removeAllMethod.Invoke(opcGroups, null);
+
+                    var disconnectMethod = _opcServer.GetType().GetMethod("Disconnect");
+                    disconnectMethod.Invoke(_opcServer, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"清理OPC资源失败: {ex.Message}", ex);
+            }
+
+            _opcGroup = null;
+            _opcServer = null;
+
+            _logger.Info("OPC服务已释放");
+        }
+    }
+
+    /// <summary>
+    /// OPC服务器状态枚举
+    /// </summary>
+    public enum OPCServerState
+    {
+        Running = 1,
+        Failed = 2,
+        NoConfig = 3,
+        Suspended = 4,
+        Test = 5
+    }
+}
+
+                _logger.Info("配置已重新加载");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"重新加载配置失败: {ex.Message}", ex);
+                return false;
+            }
+        }
+
         /// <summary>
         /// 导出所有变量节点
         /// </summary>
@@ -415,6 +473,69 @@ namespace OPC_DA_Agent
             {
                 throw new InvalidOperationException("浏览器未初始化");
             }
+            return _browser.ExportAllVariables(maxDepth);
+        }
+
+        /// <summary>
+        /// 获取节点详细信息
+        /// </summary>
+        public OPCNodeDetail GetNodeDetail(string nodeId)
+        {
+            if (_browser == null)
+            {
+                throw new InvalidOperationException("浏览器未初始化");
+            }
+            return _browser.GetNodeDetail(nodeId);
+        }
+
+        /// <summary>
+        /// 搜索节点
+        /// </summary>
+        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
+        {
+            if (_browser == null)
+            {
+                throw new InvalidOperationException("浏览器未初始化");
+            }
+            return _browser.SearchNodes(searchTerm, maxResults);
+        }
+
+        /// <summary>
+        /// 浏览节点树
+        /// </summary>
+        public OPCNode BrowseTree(string nodeId, int maxDepth = 3)
+        {
+            if (_browser == null)
+            {
+                throw new InvalidOperationException("浏览器未初始化");
+            }
+            return _browser.BrowseTree(nodeId, maxDepth);
+        }
+
+        /// <summary>
+        /// 浏览指定节点的子节点
+        /// </summary>
+        public List<OPCNode> BrowseNode(string nodeId, int depth = 1)
+        {
+            if (_browser == null)
+            {
+                throw new InvalidOperationException("浏览器未初始化");
+            }
+            return _browser.BrowseNode(nodeId, depth);
+        }
+
+        /// <summary>
+        /// 浏览OPC服务器节点
+        /// </summary>
+        public List<OPCNode> BrowseRoot()
+        {
+            if (_browser == null)
+            {
+                throw new InvalidOperationException("浏览器未初始化");
+            }
+            return _browser.BrowseRoot();
+        }
+        }
             return _browser.ExportAllVariables(maxDepth);
         }
             return _browser.GetNodeDetail(nodeId);
@@ -429,9 +550,18 @@ namespace OPC_DA_Agent
         }
 
         /// <summary>
+        /// 浏览OPC服务器节点
+        /// </summary>
+        public List<OPCNode> BrowseRoot()
+        {
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+        }
+
+        /// <summary>
         /// 浏览指定节点的子节点
         /// </summary>
-        public async Task<List<OPCNode>> BrowseNodeAsync(string nodeId, int depth = 1)
+        public List<OPCNode> BrowseNode(string nodeId, int depth = 1)
         {
             // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
@@ -440,7 +570,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 浏览节点树
         /// </summary>
-        public async Task<OPCNode> BrowseTreeAsync(string nodeId, int maxDepth = 3)
+        public OPCNode BrowseTree(string nodeId, int maxDepth = 3)
         {
             // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
@@ -449,7 +579,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 搜索节点
         /// </summary>
-        public async Task<List<OPCNode>> SearchNodesAsync(string searchTerm, int maxResults = 1000)
+        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
         {
             // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
@@ -458,7 +588,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 获取节点详细信息
         /// </summary>
-        public async Task<OPCNodeDetail> GetNodeDetailAsync(string nodeId)
+        public OPCNodeDetail GetNodeDetail(string nodeId)
         {
             // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
@@ -467,7 +597,43 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 导出所有变量节点
         /// </summary>
-        public async Task<List<TagConfig>> ExportAllVariablesAsync(int maxDepth = 3)
+        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
+        {
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+        }
+
+        /// <summary>
+        /// 浏览节点树
+        /// </summary>
+        public OPCNode BrowseTree(string nodeId, int maxDepth = 3)
+        {
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+        }
+
+        /// <summary>
+        /// 搜索节点
+        /// </summary>
+        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
+        {
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+        }
+
+        /// <summary>
+        /// 获取节点详细信息
+        /// </summary>
+        public OPCNodeDetail GetNodeDetail(string nodeId)
+        {
+            // OPC DA browse is not supported in this implementation
+            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+        }
+
+        /// <summary>
+        /// 导出所有变量节点
+        /// </summary>
+        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
         {
             // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
