@@ -412,6 +412,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleBrowseRoot()
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
                 var nodes = await _opcService.BrowseRootAsync();
@@ -428,11 +429,11 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleBrowseNode(HttpListenerRequest request)
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
-                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
-                var nodeId = query["nodeId"];
-                var depthStr = query["depth"];
+                var nodeId = GetQueryParam(request.Url.Query, "nodeId");
+                var depthStr = GetQueryParam(request.Url.Query, "depth");
 
                 if (string.IsNullOrEmpty(nodeId))
                 {
@@ -459,11 +460,11 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleBrowseTree(HttpListenerRequest request)
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
-                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
-                var nodeId = query["nodeId"];
-                var maxDepthStr = query["maxDepth"];
+                var nodeId = GetQueryParam(request.Url.Query, "nodeId");
+                var maxDepthStr = GetQueryParam(request.Url.Query, "maxDepth");
 
                 if (string.IsNullOrEmpty(nodeId))
                 {
@@ -490,11 +491,11 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleSearch(HttpListenerRequest request)
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
-                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
-                var searchTerm = query["q"];
-                var maxResultsStr = query["max"];
+                var searchTerm = GetQueryParam(request.Url.Query, "q");
+                var maxResultsStr = GetQueryParam(request.Url.Query, "max");
 
                 if (string.IsNullOrEmpty(searchTerm))
                 {
@@ -521,10 +522,10 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetNodeDetail(HttpListenerRequest request)
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
-                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
-                var nodeId = query["nodeId"];
+                var nodeId = GetQueryParam(request.Url.Query, "nodeId");
 
                 if (string.IsNullOrEmpty(nodeId))
                 {
@@ -545,10 +546,10 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleExportVariables(HttpListenerRequest request)
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
-                var query = System.Web.HttpUtility.ParseQueryString(request.Url.Query);
-                var maxDepthStr = query["maxDepth"];
+                var maxDepthStr = GetQueryParam(request.Url.Query, "maxDepth");
 
                 int maxDepth = 3;
                 if (!string.IsNullOrEmpty(maxDepthStr))
@@ -574,6 +575,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleSaveTags(HttpListenerRequest request)
         {
+            await Task.CompletedTask; // 避免CS1998警告
             try
             {
                 var body = await ReadRequestBody(request);
@@ -598,6 +600,35 @@ namespace OPC_DA_Agent
             {
                 return ApiResponse.ErrorResponse($"保存标签失败: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 读取查询参数（替代 System.Web.HttpUtility.ParseQueryString）
+        /// </summary>
+        private string GetQueryParam(string queryString, string paramName)
+        {
+            if (string.IsNullOrEmpty(queryString))
+                return null;
+
+            // 移除开头的 ?
+            if (queryString.StartsWith("?"))
+                queryString = queryString.Substring(1);
+
+            var pairs = queryString.Split('&');
+            foreach (var pair in pairs)
+            {
+                var parts = pair.Split('=');
+                if (parts.Length >= 2 && Uri.UnescapeDataString(parts[0]) == paramName)
+                {
+                    return Uri.UnescapeDataString(parts[1]);
+                }
+                else if (parts.Length == 1 && Uri.UnescapeDataString(parts[0]) == paramName)
+                {
+                    return string.Empty;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
