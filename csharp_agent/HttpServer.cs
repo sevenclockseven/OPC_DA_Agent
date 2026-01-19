@@ -278,6 +278,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetStatus()
         {
+            await Task.CompletedTask; // 避免CS1998警告
             var status = _opcService.GetStatus();
             return ApiResponse.SuccessResponse(status);
         }
@@ -287,6 +288,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetData()
         {
+            await Task.CompletedTask; // 避免CS1998警告
             var data = _opcService.GetCurrentData();
             return ApiResponse.SuccessResponse(data);
         }
@@ -296,6 +298,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetDataList()
         {
+            await Task.CompletedTask; // 避免CS1998警告
             var data = _opcService.GetCurrentDataList();
             var response = new BatchDataResponse
             {
@@ -324,7 +327,7 @@ namespace OPC_DA_Agent
                 }
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var data = await _opcService.ReadNodesAsync(batchRequest.NodeIds, batchRequest.TimeoutMs);
+                var data = await _opcService.ReadNodesAsync(batchRequest.NodeIds);
                 sw.Stop();
 
                 var response = new BatchDataResponse
@@ -349,9 +352,10 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetTags()
         {
-            // 这里可以从OPCService获取标签配置
-            // 暂时返回空列表
-            return ApiResponse.SuccessResponse(new List<object>());
+            await Task.CompletedTask; // 避免CS1998警告
+            // 返回当前配置的标签
+            var tags = _opcService.TagCount > 0 ? _config.Tags : new List<TagConfig>();
+            return ApiResponse.SuccessResponse(tags);
         }
 
         /// <summary>
@@ -359,7 +363,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleReload()
         {
-            var success = await _opcService.ReloadConfig();
+            var success = await _opcService.ReloadConfigAsync();
             if (success)
             {
                 return ApiResponse.SuccessResponse(null, "配置已重新加载");
@@ -586,7 +590,7 @@ namespace OPC_DA_Agent
                 System.IO.File.WriteAllText(tagsFile, json);
 
                 // 重新加载配置
-                await _opcService.ReloadConfig();
+                var reloadSuccess = await _opcService.ReloadConfigAsync();
 
                 return ApiResponse.SuccessResponse(null, $"已保存 {tags.Count} 个标签并重新加载");
             }
