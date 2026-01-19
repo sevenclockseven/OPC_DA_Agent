@@ -49,6 +49,14 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(MSBuildProjectDirectory)\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="Opc.Ua">
+      <HintPath>$(MSBuildProjectDirectory)\packages\OPCFoundation.NetStandard.Opc.Ua.1.5.374.118\lib\netstandard2.0\Opc.Ua.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Config.cs" />
     <Compile Include="OPCService.cs" />
