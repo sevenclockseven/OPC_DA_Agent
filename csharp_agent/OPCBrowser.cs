@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using OPCAutomation;
 
 namespace OPC_DA_Agent
 {
@@ -12,7 +11,7 @@ namespace OPC_DA_Agent
     /// </summary>
     public class OPCBrowser : IDisposable
     {
-        private OPCServer _opcServer;
+        private object _opcServer;
         private readonly Logger _logger;
         private readonly Config _config;
 
@@ -31,10 +30,11 @@ namespace OPC_DA_Agent
             {
                 _logger.Info($"正在连接到OPC服务器: {_config.OpcServerProgId}");
 
-                _opcServer = new OPCServer();
-                _opcServer.Connect(_config.OpcServerProgId);
+                _opcServer = Activator.CreateInstance(Type.GetTypeFromProgID("OPCServer"));
+                var connectMethod = _opcServer.GetType().GetMethod("Connect");
+                connectMethod.Invoke(_opcServer, new object[] { _config.OpcServerProgId });
 
-                _logger.Info($"成功连接到OPC服务器: {_opcServer.ServerName}");
+                _logger.Info($"成功连接到OPC服务器");
                 return true;
             }
             catch (Exception ex)
@@ -198,7 +198,11 @@ namespace OPC_DA_Agent
         {
             try
             {
-                _opcServer?.Disconnect();
+                if (_opcServer != null)
+                {
+                    var disconnectMethod = _opcServer.GetType().GetMethod("Disconnect");
+                    disconnectMethod.Invoke(_opcServer, null);
+                }
             }
             catch (Exception ex)
             {
