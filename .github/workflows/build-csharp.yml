@@ -20,8 +20,21 @@ jobs:
 
     - name: Restore NuGet packages
       run: |
+        # 使用 dotnet restore 来恢复包
+        dotnet restore csharp_agent/OPC_DA_Agent.csproj
+        
+        # 使用 msbuild 进行恢复
         msbuild csharp_agent/OPC_DA_Agent.csproj /t:Restore /p:Configuration=Debug /v:minimal
         msbuild csharp_agent/OPC_DA_Agent.csproj /t:Restore /p:Configuration=Release /v:minimal
+
+    - name: Check NuGet packages
+      run: |
+        if exist "csharp_agent\packages\OPC.NET.API.2.1.1" (
+          echo "OPC.NET.API package found"
+        ) else (
+          echo "OPC.NET.API package NOT found"
+          exit 1
+        )
 
     - name: Install OPC Core Components
       run: |
@@ -32,24 +45,10 @@ jobs:
         
         echo "OPC COM components not found, attempting to install..."
         
-        # Download OPC Core Components from OPC Foundation
-        # Note: You need to provide the actual download URL
-        # This is a placeholder - replace with actual URL
-        
-        # Option 1: Download from OPC Foundation (requires authentication)
-        # $opcInstaller = "OPC_Core_Components_1.05.04.exe"
-        # Invoke-WebRequest -Uri "https://opcfoundation.org/.../OPC_Core_Components_1.05.04.exe" -OutFile $opcInstaller
-        
-        # Option 2: Use a pre-downloaded installer from a storage account
-        # $opcInstaller = "OPC_Core_Components_1.05.04.exe"
-        # Invoke-WebRequest -Uri "https://yourstorageaccount.blob.core.windows.net/installers/OPC_Core_Components_1.05.04.exe" -OutFile $opcInstaller
-        
-        # Option 3: Skip installation and use a mock for testing
         echo "OPC Core Components installation skipped - using mock for testing"
         echo "Note: For production, install OPC Core Components from OPC Foundation"
         
         # Create mock registry entries for testing (NOT for production)
-        # This is only for testing the build process
         echo "Creating mock OPC registry entries for testing..."
         reg add "HKEY_CLASSES_ROOT\OPCServer" /f 2>nul || echo "Failed to add registry entry"
         
