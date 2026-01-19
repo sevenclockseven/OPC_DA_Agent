@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using OPCAutomation;
 
 namespace OPC_DA_Agent
 {
@@ -13,8 +12,8 @@ namespace OPC_DA_Agent
     /// </summary>
     public class OPCService : IDisposable
     {
-        private OPCServer _opcServer;
-        private OPCGroup _opcGroup;
+        private object _opcServer;
+        private object _opcGroup;
         private List<TagConfig> _tags;
         private Dictionary<string, object> _lastValues;
         private Timer _updateTimer;
@@ -29,7 +28,7 @@ namespace OPC_DA_Agent
         private readonly Logger _logger;
         private readonly Config _config;
 
-        public bool IsConnected => _opcServer != null && _opcServer.ServerState == (int)OPCServerState.Running;
+        public bool IsConnected => _opcServer != null;
         public int TagCount => _tags?.Count ?? 0;
         public long TotalReads => _totalReads;
         public long TotalErrors => _totalErrors;
@@ -54,18 +53,28 @@ namespace OPC_DA_Agent
                 _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
 
                 // 创建OPC服务器实例
-                _opcServer = new OPCServer();
+                _opcServer = Activator.CreateInstance(Type.GetTypeFromProgID("OPCServer"));
 
                 // 连接到OPC服务器（使用ProgID）
-                _opcServer.Connect(_config.OpcServerProgId);
+                var connectMethod = _opcServer.GetType().GetMethod("Connect");
+                connectMethod.Invoke(_opcServer, new object[] { _config.OpcServerProgId });
 
-                _logger.Info($"成功连接到OPC DA服务器: {_opcServer.ServerName}");
+                _logger.Info($"成功连接到OPC DA服务器");
 
                 // 创建OPC组
-                _opcGroup = _opcServer.OPCGroups.Add("OPC_DA_Agent_Group");
-                _opcGroup.UpdateRate = _config.UpdateInterval;
-                _opcGroup.IsActive = true;
-                _opcGroup.IsSubscribed = true;
+                var opcGroups = _opcServer.GetType().GetProperty("OPCGroups").GetValue(_opcServer);
+                var addMethod = opcGroups.GetType().GetMethod("Add");
+                _opcGroup = addMethod.Invoke(opcGroups, new object[] { "OPC_DA_Agent_Group" });
+
+                // 设置组属性
+                var updateRateProperty = _opcGroup.GetType().GetProperty("UpdateRate");
+                updateRateProperty.SetValue(_opcGroup, _config.UpdateInterval);
+
+                var isActiveProperty = _opcGroup.GetType().GetProperty("IsActive");
+                isActiveProperty.SetValue(_opcGroup, true);
+
+                var isSubscribedProperty = _opcGroup.GetType().GetProperty("IsSubscribed");
+                isSubscribedProperty.SetValue(_opcGroup, true);
 
                 // 加载标签配置
                 await LoadTagsAsync();
@@ -162,13 +171,17 @@ namespace OPC_DA_Agent
                             clientHandles[i] = i + 1;
                         }
 
-                        _opcGroup.OPCItems.AddItems(
-                            itemNames.Length,
-                            itemNames,
-                            clientHandles,
-                            out serverHandles,
-                            out itemIds
-                        );
+                        var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
+                        var addItemsMethod = opcItems.GetType().GetMethod("AddItems");
+                        var parameters = new object[] 
+                        { 
+                            itemNames.Length, 
+                            itemNames, 
+                            clientHandles, 
+                            serverHandles, 
+                            itemIds 
+                        };
+                        addItemsMethod.Invoke(opcItems, parameters);
 
                         _logger.Info($"已添加 {enabledTags.Count} 个标签到OPC组");
                     }
@@ -254,27 +267,39 @@ namespace OPC_DA_Agent
                 }
 
                 // 添加项到组
-                _opcGroup.OPCItems.AddItems(
-                    itemNames.Length,
-                    itemNames,
-                    clientHandles,
-                    out serverHandles,
-                    out itemIds
-                );
+                var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
+                var addItemsMethod = opcItems.GetType().GetMethod("AddItems");
+                var parameters = new object[] 
+                { 
+                    itemNames.Length, 
+                    itemNames, 
+                    clientHandles, 
+                    serverHandles, 
+                    itemIds 
+                };
+                addItemsMethod.Invoke(opcItems, parameters);
 
                 // 读取值
-                object[] values;
-                short[] qualities;
-                DateTime[] timestamps;
-                short[] errors;
+                object[] values = null;
+                short[] qualities = null;
+                DateTime[] timestamps = null;
+                short[] errors = null;
 
-                _opcGroup.Read(
-                    OPCDataSource.OPC_DS_DEVICE,
-                    out values,
-                    out qualities,
-                    out timestamps,
-                    out errors
-                );
+                var readMethod = _opcGroup.GetType().GetMethod("Read");
+                var readParameters = new object[] 
+                { 
+                    1, // OPC_DS_DEVICE = 1
+                    values,
+                    qualities,
+                    timestamps,
+                    errors
+                };
+                readMethod.Invoke(_opcGroup, readParameters);
+
+                values = (object[])readParameters[1];
+                qualities = (short[])readParameters[2];
+                timestamps = (DateTime[])readParameters[3];
+                errors = (short[])readParameters[4];
 
                 lock (_lock)
                 {
@@ -296,7 +321,8 @@ namespace OPC_DA_Agent
                 }
 
                 // 清理项
-                _opcGroup.OPCItems.RemoveItems(itemIds.Length, itemIds);
+                var removeItemsMethod = opcItems.GetType().GetMethod("RemoveItems");
+                removeItemsMethod.Invoke(opcItems, new object[] { itemIds.Length, itemIds });
             }
             catch (Exception ex)
             {
@@ -565,9 +591,22 @@ namespace OPC_DA_Agent
 
             try
             {
-                _opcGroup?.OPCItems?.RemoveAll();
-                _opcServer?.OPCGroups?.RemoveAll();
-                _opcServer?.Disconnect();
+                if (_opcGroup != null)
+                {
+                    var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
+                    var removeAllMethod = opcItems.GetType().GetMethod("RemoveAll");
+                    removeAllMethod.Invoke(opcItems, null);
+                }
+
+                if (_opcServer != null)
+                {
+                    var opcGroups = _opcServer.GetType().GetProperty("OPCGroups").GetValue(_opcServer);
+                    var removeAllMethod = opcGroups.GetType().GetMethod("RemoveAll");
+                    removeAllMethod.Invoke(opcGroups, null);
+
+                    var disconnectMethod = _opcServer.GetType().GetMethod("Disconnect");
+                    disconnectMethod.Invoke(_opcServer, null);
+                }
             }
             catch (Exception ex)
             {

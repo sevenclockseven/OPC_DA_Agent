@@ -75,6 +75,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <COMReference Include="OPCServer">
+      <Guid>3B1C7C5D-7745-4E1B-9D3B-1E1F5E1F5E1F</Guid>
+      <VersionMajor>1</VersionMajor>
+      <VersionMinor>0</VersionMinor>
+      <Lcid>0</Lcid>
+      <WrapperTool>tlbimp</WrapperTool>
+      <Isolated>False</Isolated>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </COMReference>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 

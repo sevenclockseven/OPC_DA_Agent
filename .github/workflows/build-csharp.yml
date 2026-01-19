@@ -28,6 +28,7 @@ jobs:
         echo "Checking for OPC COM components..."
         reg query "HKEY_CLASSES_ROOT\OPCServer" 2>nul && echo "OPC COM components found" || echo "OPC COM components not found - OPC DA must be installed on the runner"
         echo "Note: OPC DA COM components are required for runtime, but can be skipped for build verification"
+        echo "Build will fail if OPC DA COM components are not available"
       continue-on-error: true
 
     - name: Build Debug
