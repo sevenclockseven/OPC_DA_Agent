@@ -16,7 +16,6 @@
     </NuGetPackageImportStamp>
     <RestorePackages>true</RestorePackages>
     <RestorePackagesConfig>true</RestorePackagesConfig>
-    <PackagesDirectory>$(MSBuildProjectDirectory)\packages</PackagesDirectory>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
