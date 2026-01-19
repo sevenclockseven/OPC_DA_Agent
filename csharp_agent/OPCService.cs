@@ -453,31 +453,6 @@ namespace OPC_DA_Agent
         Test = 5
     }
 }
-
-                _logger.Info("配置已重新加载");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"重新加载配置失败: {ex.Message}", ex);
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// 导出所有变量节点
-        /// </summary>
-        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
-        {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return _browser.ExportAllVariables(maxDepth);
-        }
-
-        /// <summary>
-        /// 获取节点详细信息
         /// </summary>
         public OPCNodeDetail GetNodeDetail(string nodeId)
         {
