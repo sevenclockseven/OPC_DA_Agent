@@ -3,17 +3,19 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using OpcNetApi;
+using OpcNetApi.Com;
 
 namespace OPC_DA_Agent
 {
     /// <summary>
     /// OPC DA 数据采集服务
-    /// 使用 OPC Automation COM 接口
+    /// 使用 OPC .NET API
     /// </summary>
     public class OPCService : IDisposable
     {
-        private object _opcServer;
-        private object _opcGroup;
+        private Server _opcServer; // 使用 OPC .NET API 的 Server 类
+        private Group _opcGroup;   // 使用 OPC .NET API 的 Group 类
         private List<TagConfig> _tags;
         private Dictionary<string, object> _lastValues;
         private Timer _updateTimer;
@@ -28,7 +30,7 @@ namespace OPC_DA_Agent
         private readonly Logger _logger;
         private readonly Config _config;
 
-        public bool IsConnected => _opcServer != null;
+        public bool IsConnected => _opcServer != null && _opcServer.IsConnected; // 检查 API 的连接状态
         public int TagCount => _tags?.Count ?? 0;
         public long TotalReads => _totalReads;
         public long TotalErrors => _totalErrors;
@@ -52,103 +54,27 @@ namespace OPC_DA_Agent
             {
                 _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
 
-                // 获取类型信息并创建实例
-                var serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
-                if (serverType == null)
-                {
-                    _logger.Error($"无法获取ProgID '{_config.OpcServerProgId}' 对应的类型。请确认该OPC服务器已安装并注册。");
-                    return false;
-                }
+                // 使用 OPC .NET API 创建服务器对象
+                _opcServer = new Server(_config.OpcServerProgId);
+                _opcServer.Connect();
 
-                _logger.Info($"获取到的服务器类型: {serverType.FullName}");
-                _opcServer = Activator.CreateInstance(serverType);
-                if (_opcServer == null)
-                {
-                    _logger.Error($"无法创建ProgID '{_config.OpcServerProgId}' 对应的实例。");
-                    return false;
-                }
+                _logger.Info($"成功连接到OPC DA服务器: {_config.OpcServerProgId}");
 
-                _logger.Info($"成功创建OPC服务器实例: {_config.OpcServerProgId}");
+                // 创建OPC组
+                _opcGroup = _opcServer.CreateGroup("OPC_DA_Agent_Group", true, _config.UpdateInterval, null, null, null, null);
+                _opcGroup.IsActive = true;
+                _opcGroup.IsSubscribed = true;
 
-                // 尝试获取 OPCGroups 属性
-                var opcGroupsProperty = _opcServer.GetType().GetProperty("OPCGroups");
-                if (opcGroupsProperty == null)
-                {
-                    _logger.Error("无法获取OPCGroups属性。");
-                    return false;
-                }
-                _logger.Info("成功获取OPCGroups属性。");
-
-                var opcGroups = opcGroupsProperty.GetValue(_opcServer);
-                if (opcGroups == null)
-                {
-                    _logger.Error("获取到的OPCGroups对象为null。");
-                    return false;
-                }
-                _logger.Info("成功获取OPCGroups对象。");
-
-                // 尝试添加组
-                var addMethod = opcGroups.GetType().GetMethod("Add");
-                if (addMethod == null)
-                {
-                    _logger.Error("无法获取OPCGroups.Add方法。");
-                    return false;
-                }
-                _logger.Info("成功获取OPCGroups.Add方法。");
-
-                _opcGroup = addMethod.Invoke(opcGroups, new object[] { "OPC_DA_Agent_Group" });
-                if (_opcGroup == null)
-                {
-                    _logger.Error("无法创建OPC组。");
-                    return false;
-                }
-                _logger.Info($"成功创建OPC组: OPC_DA_Agent_Group");
-
-                // 尝试设置组属性
-                var updateRateProperty = _opcGroup.GetType().GetProperty("UpdateRate");
-                if (updateRateProperty != null)
-                {
-                    updateRateProperty.SetValue(_opcGroup, _config.UpdateInterval);
-                    _logger.Info($"设置组更新率为: {_config.UpdateInterval}ms");
-                }
-                else
-                {
-                    _logger.Warn("无法获取OPCGroup.UpdateRate属性，使用默认值。");
-                }
-
-                var isActiveProperty = _opcGroup.GetType().GetProperty("IsActive");
-                if (isActiveProperty != null)
-                {
-                    isActiveProperty.SetValue(_opcGroup, true);
-                    _logger.Info("设置组状态为活动。");
-                }
-                else
-                {
-                    _logger.Warn("无法获取OPCGroup.IsActive属性。");
-                }
-
-                var isSubscribedProperty = _opcGroup.GetType().GetProperty("IsSubscribed");
-                if (isSubscribedProperty != null)
-                {
-                    isSubscribedProperty.SetValue(_opcGroup, true);
-                    _logger.Info("设置组为订阅模式。");
-                }
-                else
-                {
-                    _logger.Warn("无法获取OPCGroup.IsSubscribed属性。");
-                }
+                _logger.Info($"成功创建并激活OPC组: OPC_DA_Agent_Group");
 
                 // 加载标签配置
                 LoadTags();
 
-                _logger.Info($"成功连接到OPC DA服务器: {_config.OpcServerProgId}");
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.Error($"连接OPC DA服务器失败: {ex.Message}", ex);
-                // 记录完整的异常信息，包括内部异常
-                _logger.Error($"完整异常信息: {ex}");
                 _totalErrors++;
                 return false;
             }
@@ -226,50 +152,23 @@ namespace OPC_DA_Agent
                     var enabledTags = _tags.Where(t => t.Enabled).ToList();
                     if (enabledTags.Count > 0)
                     {
-                        if (_opcGroup == null)
-                        {
-                            _logger.Error("无法添加标签：OPC组未初始化。");
-                            _isRunning = false;
-                            return false;
-                        }
-
                         var itemNames = enabledTags.Select(t => t.NodeId).ToArray();
-                        var itemIds = new int[itemNames.Length];
-                        var serverHandles = new int[itemNames.Length];
-                        var clientHandles = new int[itemNames.Length];
+                        var results = _opcGroup.AddItems(itemNames, null, null); // API 会自动分配句柄
 
-                        for (int i = 0; i < itemNames.Length; i++)
+                        // 检查添加结果 (results 中包含句柄和可能的错误信息)
+                        for (int i = 0; i < results.Length; i++)
                         {
-                            clientHandles[i] = i + 1;
+                            if (results[i].ResultID.Succeeded())
+                            {
+                                _logger.Debug($"成功添加标签: {itemNames[i]} (Handle: {results[i].ServerHandle})");
+                            }
+                            else
+                            {
+                                _logger.Error($"添加标签失败: {itemNames[i]}, ResultID: {results[i].ResultID}");
+                            }
                         }
 
-                        var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
-                        if (opcItems == null)
-                        {
-                            _logger.Error("无法获取OPCItems对象。");
-                            _isRunning = false;
-                            return false;
-                        }
-
-                        var addItemsMethod = opcItems.GetType().GetMethod("AddItems");
-                        if (addItemsMethod == null)
-                        {
-                            _logger.Error("无法获取OPCItems.AddItems方法。");
-                            _isRunning = false;
-                            return false;
-                        }
-
-                        var parameters = new object[]
-                        {
-                            itemNames.Length,
-                            itemNames,
-                            clientHandles,
-                            serverHandles,
-                            itemIds
-                        };
-                        addItemsMethod.Invoke(opcItems, parameters);
-
-                        _logger.Info($"已添加 {enabledTags.Count} 个标签到OPC组");
+                        _logger.Info($"已尝试添加 {enabledTags.Count} 个标签到OPC组");
                     }
                 }
 
@@ -287,7 +186,6 @@ namespace OPC_DA_Agent
             catch (Exception ex)
             {
                 _logger.Error($"启动数据采集失败: {ex.Message}", ex);
-                _logger.Error($"异常堆栈: {ex.StackTrace}");
                 _isRunning = false;
                 return false;
             }
@@ -345,52 +243,29 @@ namespace OPC_DA_Agent
 
             try
             {
-                var nodeIds = tags.Select(t => t.NodeId).ToList();
+                var nodeIds = tags.Select(t => t.NodeId).ToArray(); // API 通常需要数组
 
-                object[] values = null;
-                short[] qualities = null;
-                DateTime[] timestamps = null;
-                short[] errors = null;
+                // 使用 API 读取数据
+                var results = _opcGroup.SyncRead((int)OpcDataSource.CacheOrDevice, nodeIds, null); // null for default handles
 
-                var readMethod = _opcGroup.GetType().GetMethod("SyncRead");
-                if (readMethod == null)
+                for (int i = 0; i < nodeIds.Length && i < results.Length; i++)
                 {
-                    _logger.Error("无法获取OPCGroup.SyncRead方法。");
-                    return;
-                }
-
-                var readParameters = new object[]
-                {
-                    1, // OPC_DS_DEVICE = 1
-                    nodeIds.Count,
-                    nodeIds.ToArray(),
-                    values,
-                    qualities,
-                    timestamps,
-                    errors
-                };
-                readMethod.Invoke(_opcGroup, readParameters);
-
-                values = (object[])readParameters[3];
-                qualities = (short[])readParameters[4];
-                timestamps = (DateTime[])readParameters[5];
-                errors = (short[])readParameters[6];
-
-                var timestamp = DateTime.Now;
-
-                for (int i = 0; i < nodeIds.Count && i < values.Length; i++)
-                {
-                    var value = values[i];
-                    var error = errors[i];
-                    var quality = qualities[i]; // 使用 SyncRead 获取的质量
-
-                    var qualityStr = (quality & 0xC0) == 0xC0 ? "Good" : "Bad"; // 简单判断质量
-                    var statusStr = error == 0 ? "Good" : $"Error: {error:X4}"; // 错误码转十六进制
-
-                    // 更新缓存
-                    lock (_lock)
+                    if (results[i].ResultID.Succeeded())
                     {
-                        _lastValues[nodeIds[i]] = value;
+                        var value = results[i].Value;
+                        var quality = results[i].Quality;
+                        var timestamp = results[i].Timestamp;
+
+                        // 更新缓存
+                        lock (_lock)
+                        {
+                            _lastValues[nodeIds[i]] = value;
+                        }
+                    }
+                    else
+                    {
+                        _logger.Error($"读取标签失败: {nodeIds[i]}, ResultID: {results[i].ResultID}");
+                        _totalErrors++; // 计入错误
                     }
                 }
             }
@@ -450,7 +325,7 @@ namespace OPC_DA_Agent
             }
         }
 
-        #region 新增方法
+        #region 新增方法 (使用 API)
 
         /// <summary>
         /// 获取当前数据
@@ -481,9 +356,9 @@ namespace OPC_DA_Agent
                             NodeId = kvp.Key,
                             Name = kvp.Key,
                             Value = kvp.Value,
-                            Quality = "Good", // 可以从缓存中也存储质量信息
+                            Quality = "Good", // API 可以提供更详细的 Quality
                             Timestamp = DateTime.Now,
-                            Status = "Good", // 可以从缓存中也存储状态信息
+                            Status = "Good", // API 可以提供更详细的 Status
                             DataType = kvp.Value.GetType().Name
                         });
                     }
@@ -534,90 +409,39 @@ namespace OPC_DA_Agent
 
             try
             {
-                var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
+                // 创建临时组和项来读取
+                var tempGroupName = $"TempGroup_{Guid.NewGuid()}";
+                var tempGroup = _opcServer.CreateGroup(tempGroupName, false, 1000, null, null, null, null); // 短暂的更新周期
+                tempGroup.IsActive = true;
 
-                // 添加临时项
-                var itemNames = nodeIds.ToArray();
-                var serverHandles = new int[itemNames.Length];
-                var clientHandles = new int[itemNames.Length];
+                var itemsToAdd = nodeIds.ToArray();
+                var addResults = tempGroup.AddItems(itemsToAdd, null, null);
 
-                for (int i = 0; i < itemNames.Length; i++)
+                var readResults = tempGroup.SyncRead((int)OpcDataSource.CacheOrDevice, itemsToAdd, null);
+
+                for (int i = 0; i < itemsToAdd.Length && i < readResults.Length; i++)
                 {
-                    clientHandles[i] = i + 1;
-                }
-
-                var addItemsMethod = opcItems.GetType().GetMethod("AddItems");
-                var parameters = new object[]
-                {
-                    itemNames.Length,
-                    itemNames,
-                    clientHandles,
-                    serverHandles,
-                    new int[itemNames.Length]
-                };
-                addItemsMethod.Invoke(opcItems, parameters);
-
-                // 读取值
-                object[] values = null;
-                short[] qualities = null;
-                DateTime[] timestamps = null;
-                short[] errors = null;
-
-                var syncReadMethod = _opcGroup.GetType().GetMethod("SyncRead");
-                var readParameters = new object[]
-                {
-                    1, // OPC_DS_DEVICE = 1
-                    nodeIds.Count,
-                    itemNames,
-                    values,
-                    qualities,
-                    timestamps,
-                    errors
-                };
-
-                try
-                {
-                    syncReadMethod.Invoke(_opcGroup, readParameters);
-
-                    values = (object[])readParameters[3];
-                    qualities = (short[])readParameters[4];
-                    timestamps = (DateTime[])readParameters[5];
-                    errors = (short[])readParameters[6];
-
-                    var timestamp = DateTime.Now;
-
-                    for (int i = 0; i < nodeIds.Count && i < values.Length; i++)
+                    if (readResults[i].ResultID.Succeeded())
                     {
-                        var value = values[i];
-                        var error = errors[i];
-                        var quality = qualities[i];
-
-                        var qualityStr = (quality & 0xC0) == 0xC0 ? "Good" : "Bad"; // 简单判断质量
-                        var statusStr = error == 0 ? "Good" : $"Error: {error:X4}"; // 错误码转十六进制
-
                         result.Add(new TagValue
                         {
-                            NodeId = nodeIds[i],
-                            Name = nodeIds[i],
-                            Value = value,
-                            Quality = qualityStr,
-                            Timestamp = timestamps[i],
-                            Status = statusStr,
-                            DataType = value?.GetType().Name ?? "Unknown"
+                            NodeId = itemsToAdd[i],
+                            Name = itemsToAdd[i],
+                            Value = readResults[i].Value,
+                            Quality = readResults[i].Quality.ToString(), // API Quality
+                            Timestamp = readResults[i].Timestamp,
+                            Status = readResults[i].ResultID.ToString(), // API ResultID as Status
+                            DataType = readResults[i].Value?.GetType().Name ?? "Unknown"
                         });
                     }
-                }
-                finally
-                {
-                    // 移除临时项
-                    var removeItemsMethod = opcItems.GetType().GetMethod("RemoveItems");
-                    var removeParams = new object[]
+                    else
                     {
-                        serverHandles.Length,
-                        serverHandles
-                    };
-                    removeItemsMethod.Invoke(opcItems, removeParams);
+                        _logger.Error($"读取临时项失败: {itemsToAdd[i]}, ResultID: {readResults[i].ResultID}");
+                    }
                 }
+
+                // 清理临时组
+                tempGroup.Dispose();
             }
             catch (Exception ex)
             {
@@ -727,37 +551,8 @@ namespace OPC_DA_Agent
 
             try
             {
-                if (_opcGroup != null)
-                {
-                    var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
-                    if (opcItems != null)
-                    {
-                        var removeAllMethod = opcItems.GetType().GetMethod("RemoveAll");
-                        if (removeAllMethod != null)
-                        {
-                            removeAllMethod.Invoke(opcItems, null);
-                        }
-                    }
-                }
-
-                if (_opcServer != null)
-                {
-                    var opcGroups = _opcServer.GetType().GetProperty("OPCGroups").GetValue(_opcServer);
-                    if (opcGroups != null)
-                    {
-                        var removeAllMethod = opcGroups.GetType().GetMethod("RemoveAll");
-                        if (removeAllMethod != null)
-                        {
-                            removeAllMethod.Invoke(opcGroups, null);
-                        }
-                    }
-
-                    var disconnectMethod = _opcServer.GetType().GetMethod("Disconnect");
-                    if (disconnectMethod != null)
-                    {
-                        disconnectMethod.Invoke(_opcServer, null);
-                    }
-                }
+                _opcGroup?.Dispose();
+                _opcServer?.Disconnect();
             }
             catch (Exception ex)
             {

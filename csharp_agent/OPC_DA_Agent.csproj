@@ -12,11 +12,6 @@
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
-    <NuGetPackageImportStamp>
-    </NuGetPackageImportStamp>
-    <RestorePackages>true</RestorePackages>
-    <RestorePackagesConfig>true</RestorePackagesConfig>
-    <PackagesDirectory>$(MSBuildProjectDirectory)\packages</PackagesDirectory>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -46,44 +41,14 @@
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
-    <Reference Include="System.Net.Http" />
     <Reference Include="System.Xml" />
-  </ItemGroup>
-
-<ItemGroup>
-  <Reference Include="OpcNetApi, Version=2.1.1.0, Culture=neutral, PublicKeyToken=9a40e98fc72eb6d3, processorArchitecture=MSIL">
-    <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.dll</HintPath>
-    <Private>True</Private>
-  </Reference>
-  <Reference Include="OpcNetApi.Com, Version=2.1.1.0, Culture=neutral, PublicKeyToken=9a40e98fc72eb6d3, processorArchitecture=MSIL">
-    <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.Com.dll</HintPath>
-    <Private>True</Private>
-  </Reference>
-</ItemGroup>
-
-
-  <ItemGroup>
-    <COMReference Include="OPCDA">
-      <Guid>3B1C7C5D-7745-4E1B-9D3B-1E1F5E1F5E1F</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <COMReference Include="OPCServer">
-      <Guid>3B1C7C5D-7745-4E1B-9D3B-1E1F5E1F5E1F</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
+    <!-- 添加 OPC .NET API 引用 -->
+    <Reference Include="OpcNetApi">
+      <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.dll</HintPath>
+    </Reference>
+    <Reference Include="OpcNetApi.Com">
+      <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.Com.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -94,15 +59,12 @@
     <Compile Include="Program.cs" />
     <Compile Include="Config.cs" />
     <Compile Include="Logger.cs" />
-    <Compile Include="OPCBrowser.cs" />
     <Compile Include="OPCService.cs" />
     <Compile Include="HttpServer.cs" />
     <Compile Include="DataModel.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
-    <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(MSBuildExtensionsPath)\Microsoft\NuGet\Microsoft.NuGet.targets" Condition="Exists('$(MSBuildExtensionsPath)\Microsoft\NuGet\Microsoft.NuGet.targets')" />
 </Project>
