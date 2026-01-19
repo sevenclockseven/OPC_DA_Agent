@@ -43,7 +43,7 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
     <!-- 添加 OPC .NET API 引用 -->
->
+
 
     </Reference>
   </ItemGroup>
