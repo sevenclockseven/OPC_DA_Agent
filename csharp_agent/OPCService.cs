@@ -446,3 +446,223 @@ namespace OPC_DA_Agent
         Test = 5
     }
 }
+// 在 OPCService.cs 文件中添加以下方法
+
+/// <summary>
+/// 获取当前数据
+/// </summary>
+public Dictionary<string, object> GetCurrentData()
+{
+    lock (_lock)
+    {
+        return new Dictionary<string, object>(_lastValues);
+    }
+}
+
+/// <summary>
+/// 获取当前数据列表
+/// </summary>
+public List<TagValue> GetCurrentDataList()
+{
+    var result = new List<TagValue>();
+    
+    lock (_lock)
+    {
+        foreach (var kvp in _lastValues)
+        {
+            if (kvp.Value != null)
+            {
+                result.Add(new TagValue
+                {
+                    NodeId = kvp.Key,
+                    Name = kvp.Key,
+                    Value = kvp.Value,
+                    Quality = "Good",
+                    Timestamp = DateTime.Now,
+                    Status = "Good",
+                    DataType = kvp.Value.GetType().Name
+                });
+            }
+        }
+    }
+    
+    return result;
+}
+
+/// <summary>
+/// 读取指定节点
+/// </summary>
+public async Task<List<TagValue>> ReadNodesAsync(List<string> nodeIds)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    
+    var result = new List<TagValue>();
+    
+    try
+    {
+        // 批量读取
+        var batchSize = _config.BatchSize;
+        for (int i = 0; i < nodeIds.Count; i += batchSize)
+        {
+            var batch = nodeIds.Skip(i).Take(batchSize).ToList();
+            var batchResult = await ReadBatchAsyncWithNodeIds(batch);
+            result.AddRange(batchResult);
+        }
+        
+        return result;
+    }
+    catch (Exception ex)
+    {
+        _logger.Error($"读取节点失败: {ex.Message}", ex);
+        _totalErrors++;
+        return result;
+    }
+}
+
+/// <summary>
+/// 批量读取指定节点
+/// </summary>
+private async Task<List<TagValue>> ReadBatchAsyncWithNodeIds(List<string> nodeIds)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    
+    var result = new List<TagValue>();
+
+    try
+    {
+        var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
+        
+        // 添加临时项
+        var itemNames = nodeIds.ToArray();
+        var serverHandles = new int[itemNames.Length];
+        var clientHandles = new int[itemNames.Length];
+
+        for (int i = 0; i < itemNames.Length; i++)
+        {
+            clientHandles[i] = i + 1;
+        }
+
+        var addItemsMethod = opcItems.GetType().GetMethod("AddItems");
+        var parameters = new object[] 
+        { 
+            itemNames.Length, 
+            itemNames, 
+            clientHandles, 
+            serverHandles, 
+            new int[itemNames.Length]
+        };
+        addItemsMethod.Invoke(opcItems, parameters);
+
+        // 读取值
+        object[] values = null;
+        short[] qualities = null;
+        DateTime[] timestamps = null;
+        short[] errors = null;
+
+        var syncReadMethod = _opcGroup.GetType().GetMethod("SyncRead");
+        var readParameters = new object[] 
+        { 
+            1, // OPC_DS_DEVICE = 1
+            nodeIds.Count,
+            itemNames,
+            values,
+            qualities,
+            timestamps,
+            errors
+        };
+        
+        try
+        {
+            syncReadMethod.Invoke(_opcGroup, readParameters);
+
+            values = (object[])readParameters[3];
+            qualities = (short[])readParameters[4];
+            timestamps = (DateTime[])readParameters[5];
+            errors = (short[])readParameters[6];
+
+            var timestamp = DateTime.Now;
+
+            for (int i = 0; i < nodeIds.Count && i < values.Length; i++)
+            {
+                var value = values[i];
+                var error = errors[i];
+                var quality = qualities[i];
+
+                var qualityStr = quality == 192 ? "Good" : "Bad"; // OPC quality codes
+                var statusStr = error == 0 ? "Good" : $"Error: {error}";
+
+                result.Add(new TagValue
+                {
+                    NodeId = nodeIds[i],
+                    Name = nodeIds[i],
+                    Value = value,
+                    Quality = qualityStr,
+                    Timestamp = timestamps[i],
+                    Status = statusStr,
+                    DataType = value?.GetType().Name ?? "Unknown"
+                });
+            }
+        }
+        finally
+        {
+            // 移除临时项
+            var removeItemsMethod = opcItems.GetType().GetMethod("RemoveItems");
+            var removeParams = new object[]
+            {
+                serverHandles.Length,
+                serverHandles
+            };
+            removeItemsMethod.Invoke(opcItems, removeParams);
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.Error($"批量读取节点失败: {ex.Message}", ex);
+        _totalErrors++;
+    }
+
+    return result;
+}
+
+// 添加浏览相关的方法（返回空实现，因为OPC DA不支持浏览）
+public async Task<List<OPCNode>> BrowseRootAsync()
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+}
+
+public async Task<List<OPCNode>> BrowseNodeAsync(string nodeId, int depth = 1)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+}
+
+public async Task<OPCNode> BrowseTreeAsync(string nodeId, int maxDepth = 3)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+}
+
+public async Task<List<OPCNode>> SearchNodesAsync(string searchTerm, int maxResults = 1000)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+}
+
+public async Task<OPCNodeDetail> GetNodeDetailAsync(string nodeId)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+}
+
+public async Task<List<TagConfig>> ExportAllVariablesAsync(int maxDepth = 3)
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
+}
+
+public async Task<bool> ReloadConfigAsync()
+{
+    await Task.CompletedTask; // 避免CS1998警告
+    return ReloadConfig();
+}

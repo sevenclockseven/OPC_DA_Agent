@@ -246,3 +246,74 @@ namespace OPC_DA_Agent
         public bool? EnableCompression { get; set; }
     }
 }
+/// <summary>
+/// OPC节点信息
+/// </summary>
+public class OPCNode
+{
+    [JsonProperty("node_id")]
+    public string NodeId { get; set; }
+
+    [JsonProperty("name")]
+    public string Name { get; set; }
+
+    [JsonProperty("description")]
+    public string Description { get; set; }
+
+    [JsonProperty("data_type")]
+    public string DataType { get; set; }
+
+    [JsonProperty("access_rights")]
+    public string AccessRights { get; set; }
+
+    [JsonProperty("children")]
+    public List<OPCNode> Children { get; set; } = new List<OPCNode>();
+
+    [JsonProperty("has_children")]
+    public bool HasChildren { get; set; }
+
+    [JsonProperty("is_folder")]
+    public bool IsFolder { get; set; }
+}
+
+/// <summary>
+/// OPC节点详细信息
+/// </summary>
+public class OPCNodeDetail
+{
+    [JsonProperty("node_id")]
+    public string NodeId { get; set; }
+
+    [JsonProperty("name")]
+    public string Name { get; set; }
+
+    [JsonProperty("description")]
+    public string Description { get; set; }
+
+    [JsonProperty("data_type")]
+    public string DataType { get; set; }
+
+    [JsonProperty("access_rights")]
+    public string AccessRights { get; set; }
+
+    [JsonProperty("scan_rate")]
+    public double ScanRate { get; set; }
+
+    [JsonProperty("eu_type")]
+    public string EuType { get; set; }
+
+    [JsonProperty("eu_info")]
+    public string EuInfo { get; set; }
+
+    [JsonProperty("min_value")]
+    public object MinValue { get; set; }
+
+    [JsonProperty("max_value")]
+    public object MaxValue { get; set; }
+
+    [JsonProperty("initial_value")]
+    public object InitialValue { get; set; }
+
+    [JsonProperty("item_id")]
+    public string ItemId { get; set; }
+}
