@@ -43,11 +43,8 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
     <!-- 添加 OPC .NET API 引用 -->
-    <Reference Include="OpcNetApi" Version="2.1.1">
-      <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.dll</HintPath>
-    </Reference>
-    <Reference Include="OpcNetApi.Com">
-      <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.Com.dll</HintPath>
+>
+
     </Reference>
   </ItemGroup>
 
@@ -64,6 +61,7 @@
     <Compile Include="DataModel.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="packages.config" />
     <None Include="App.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
