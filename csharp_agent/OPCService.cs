@@ -46,57 +46,55 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 连接到OPC DA服务器
         /// </summary>
-public async Task<bool> ConnectAsync()
-{
-    try
-    {
-        _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
-
-        // 获取类型信息并创建实例
-        var serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
-        if (serverType == null)
+        public async Task<bool> ConnectAsync()
         {
-            _logger.Error($"无法获取ProgID '{_config.OpcServerProgId}' 对应的类型。");
-            return false;
-        }
+            try
+            {
+                _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
 
-        _logger.Info($"获取到的服务器类型: {serverType.FullName}");
-        _opcServer = Activator.CreateInstance(serverType);
-        if (_opcServer == null)
-        {
-            _logger.Error($"无法创建ProgID '{_config.OpcServerProgId}' 对应的实例。");
-            return false;
-        }
-
-        _logger.Info($"成功创建OPC服务器实例: {_config.OpcServerProgId}");
-
-        // 尝试获取 OPCGroups 属性
-        var opcGroupsProperty = _opcServer.GetType().GetProperty("OPCGroups");
-        if (opcGroupsProperty == null)
-        {
-            _logger.Error("无法获取OPCGroups属性。");
-            return false;
-        }
-        _logger.Info("成功获取OPCGroups属性。");
-
-        var opcGroups = opcGroupsProperty.GetValue(_opcServer);
-        if (opcGroups == null)
-        {
-            _logger.Error("获取到的OPCGroups对象为null。");
-            return false;
-        }
-        _logger.Info("成功获取OPCGroups对象。");
-
-  
+                // 获取类型信息并创建实例
+                var serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
+                if (serverType == null)
+                {
+                    _logger.Error($"无法获取ProgID '{_config.OpcServerProgId}' 对应的类型。请确认该OPC服务器已安装并注册。");
                     return false;
                 }
 
+                _logger.Info($"获取到的服务器类型: {serverType.FullName}");
+                _opcServer = Activator.CreateInstance(serverType);
+                if (_opcServer == null)
+                {
+                    _logger.Error($"无法创建ProgID '{_config.OpcServerProgId}' 对应的实例。");
+                    return false;
+                }
+
+                _logger.Info($"成功创建OPC服务器实例: {_config.OpcServerProgId}");
+
+                // 尝试获取 OPCGroups 属性
+                var opcGroupsProperty = _opcServer.GetType().GetProperty("OPCGroups");
+                if (opcGroupsProperty == null)
+                {
+                    _logger.Error("无法获取OPCGroups属性。");
+                    return false;
+                }
+                _logger.Info("成功获取OPCGroups属性。");
+
+                var opcGroups = opcGroupsProperty.GetValue(_opcServer);
+                if (opcGroups == null)
+                {
+                    _logger.Error("获取到的OPCGroups对象为null。");
+                    return false;
+                }
+                _logger.Info("成功获取OPCGroups对象。");
+
+                // 尝试添加组
                 var addMethod = opcGroups.GetType().GetMethod("Add");
                 if (addMethod == null)
                 {
                     _logger.Error("无法获取OPCGroups.Add方法。");
                     return false;
                 }
+                _logger.Info("成功获取OPCGroups.Add方法。");
 
                 _opcGroup = addMethod.Invoke(opcGroups, new object[] { "OPC_DA_Agent_Group" });
                 if (_opcGroup == null)
@@ -104,26 +102,40 @@ public async Task<bool> ConnectAsync()
                     _logger.Error("无法创建OPC组。");
                     return false;
                 }
-
                 _logger.Info($"成功创建OPC组: OPC_DA_Agent_Group");
 
-                // 设置组属性
+                // 尝试设置组属性
                 var updateRateProperty = _opcGroup.GetType().GetProperty("UpdateRate");
                 if (updateRateProperty != null)
                 {
                     updateRateProperty.SetValue(_opcGroup, _config.UpdateInterval);
+                    _logger.Info($"设置组更新率为: {_config.UpdateInterval}ms");
+                }
+                else
+                {
+                    _logger.Warn("无法获取OPCGroup.UpdateRate属性，使用默认值。");
                 }
 
                 var isActiveProperty = _opcGroup.GetType().GetProperty("IsActive");
                 if (isActiveProperty != null)
                 {
                     isActiveProperty.SetValue(_opcGroup, true);
+                    _logger.Info("设置组状态为活动。");
+                }
+                else
+                {
+                    _logger.Warn("无法获取OPCGroup.IsActive属性。");
                 }
 
                 var isSubscribedProperty = _opcGroup.GetType().GetProperty("IsSubscribed");
                 if (isSubscribedProperty != null)
                 {
                     isSubscribedProperty.SetValue(_opcGroup, true);
+                    _logger.Info("设置组为订阅模式。");
+                }
+                else
+                {
+                    _logger.Warn("无法获取OPCGroup.IsSubscribed属性。");
                 }
 
                 // 加载标签配置
@@ -135,8 +147,8 @@ public async Task<bool> ConnectAsync()
             catch (Exception ex)
             {
                 _logger.Error($"连接OPC DA服务器失败: {ex.Message}", ex);
-                // 记录更详细的堆栈信息有助于定位问题
-                _logger.Error($"异常堆栈: {ex.StackTrace}");
+                // 记录完整的异常信息，包括内部异常
+                _logger.Error($"完整异常信息: {ex}");
                 _totalErrors++;
                 return false;
             }
