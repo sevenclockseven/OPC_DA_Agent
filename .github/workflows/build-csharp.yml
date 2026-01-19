@@ -22,7 +22,9 @@ jobs:
       uses: NuGet/setup-nuget@v2
 
     - name: Restore NuGet packages
-      run: nuget restore csharp_agent/OPC_DA_Agent.csproj -PackagesDirectory csharp_agent/packages
+      run: |
+        cd csharp_agent
+        nuget restore OPC_DA_Agent.csproj -PackagesDirectory packages
 
     - name: Build Debug
       run: |
