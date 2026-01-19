@@ -20,13 +20,17 @@ jobs:
 
     - name: Restore NuGet packages
       run: |
-        # 使用 msbuild 来恢复 packages.config 中的包
-        msbuild csharp_agent/OPC_DA_Agent.csproj /t:Restore /p:Configuration=Debug /v:minimal
-        msbuild csharp_agent/OPC_DA_Agent.csproj /t:Restore /p:Configuration=Release /v:minimal
+        # 下载 nuget.exe (如果尚未安装)
+        Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "nuget.exe"
+        
+        # 使用 nuget.exe 恢复包
+        .\nuget.exe restore csharp_agent/OPC_DA_Agent.csproj
+        
+        # 列出已恢复的包
+        Get-ChildItem "csharp_agent\packages" -Filter "OPC.NET*" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Name }
 
     - name: Check NuGet packages
       run: |
-        # 检查 packages 目录在项目根目录下是否存在该包
         $projectDir = "csharp_agent"
         $packageName = "OPC.NET.API.2.1.1"
         $dllPath = "$projectDir\..\packages\$packageName\lib\net20\OpcNetApi.dll"
