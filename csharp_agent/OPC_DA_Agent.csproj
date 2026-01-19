@@ -50,17 +50,17 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
 
-  <ItemGroup>
-    <COMReference Include="OPC.Automation">
-      <Guid>3B1C7C5D-7745-4E1B-9D3B-1E1F5E1F5E1F</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-  </ItemGroup>
+<ItemGroup>
+  <Reference Include="OpcNetApi, Version=2.1.1.0, Culture=neutral, PublicKeyToken=9a40e98fc72eb6d3, processorArchitecture=MSIL">
+    <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.dll</HintPath>
+    <Private>True</Private>
+  </Reference>
+  <Reference Include="OpcNetApi.Com, Version=2.1.1.0, Culture=neutral, PublicKeyToken=9a40e98fc72eb6d3, processorArchitecture=MSIL">
+    <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.Com.dll</HintPath>
+    <Private>True</Private>
+  </Reference>
+</ItemGroup>
+
 
   <ItemGroup>
     <COMReference Include="OPCDA">

@@ -53,11 +53,9 @@ namespace OPC_DA_Agent
                 _logger.Info($"正在连接到OPC DA服务器: {_config.OpcServerProgId}");
 
                 // 创建OPC服务器实例
-                _opcServer = Activator.CreateInstance(Type.GetTypeFromProgID("OPCServer"));
+                _opcServer = Activator.CreateInstance(Type.GetTypeFromProgID(_config.OpcServerProgId));
 
-                // 连接到OPC服务器（使用ProgID）
-                var connectMethod = _opcServer.GetType().GetMethod("Connect");
-                connectMethod.Invoke(_opcServer, new object[] { _config.OpcServerProgId });
+                // 对于OPC服务器，我们不需要显式调用Connect方法，创建实例即连接
 
                 _logger.Info($"成功连接到OPC DA服务器");
 
@@ -256,39 +254,19 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var itemNames = tags.Select(t => t.NodeId).ToArray();
-                var itemIds = new int[itemNames.Length];
-                var serverHandles = new int[itemNames.Length];
-                var clientHandles = new int[itemNames.Length];
-
-                for (int i = 0; i < itemNames.Length; i++)
-                {
-                    clientHandles[i] = i + 1;
-                }
-
-                // 添加项到组
-                var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
-                var addItemsMethod = opcItems.GetType().GetMethod("AddItems");
-                var parameters = new object[] 
-                { 
-                    itemNames.Length, 
-                    itemNames, 
-                    clientHandles, 
-                    serverHandles, 
-                    itemIds 
-                };
-                addItemsMethod.Invoke(opcItems, parameters);
-
-                // 读取值
+                var nodeIds = tags.Select(t => t.NodeId).ToList();
+                
                 object[] values = null;
                 short[] qualities = null;
                 DateTime[] timestamps = null;
                 short[] errors = null;
 
-                var readMethod = _opcGroup.GetType().GetMethod("Read");
+                var readMethod = _opcGroup.GetType().GetMethod("SyncRead");
                 var readParameters = new object[] 
                 { 
                     1, // OPC_DS_DEVICE = 1
+                    nodeIds.Count,
+                    nodeIds.ToArray(),
                     values,
                     qualities,
                     timestamps,
@@ -296,32 +274,10 @@ namespace OPC_DA_Agent
                 };
                 readMethod.Invoke(_opcGroup, readParameters);
 
-                values = (object[])readParameters[1];
-                qualities = (short[])readParameters[2];
-                timestamps = (DateTime[])readParameters[3];
-                errors = (short[])readParameters[4];
-
-                // 读取值
-                object[] values = null;
-                short[] qualities = null;
-                DateTime[] timestamps = null;
-                short[] errors = null;
-
-                var readMethod = _opcGroup.GetType().GetMethod("Read");
-                var readParameters = new object[] 
-                { 
-                    1, // OPC_DS_DEVICE = 1
-                    values,
-                    qualities,
-                    timestamps,
-                    errors
-                };
-                readMethod.Invoke(_opcGroup, readParameters);
-
-                values = (object[])readParameters[1];
-                qualities = (short[])readParameters[2];
-                timestamps = (DateTime[])readParameters[3];
-                errors = (short[])readParameters[4];
+                values = (object[])readParameters[3];
+                qualities = (short[])readParameters[4];
+                timestamps = (DateTime[])readParameters[5];
+                errors = (short[])readParameters[6];
 
                 var timestamp = DateTime.Now;
 
@@ -332,29 +288,18 @@ namespace OPC_DA_Agent
 
                     var quality = error == 0 ? "Good" : "Bad";
 
-                    result.Add(new TagValue
+                    // 更新缓存
+                    lock (_lock)
                     {
-                        NodeId = nodeIds[i],
-                        Name = nodeIds[i],
-                        Value = value,
-                        Quality = quality,
-                        Timestamp = timestamp,
-                        Status = error == 0 ? "Good" : $"Error: {error}"
-                    });
+                        _lastValues[nodeIds[i]] = value;
+                    }
                 }
-
-                _totalReads++;
-
-                // 清理项
-                _opcGroup.OPCItems.RemoveItems(itemIds.Length, itemIds);
             }
             catch (Exception ex)
             {
                 _logger.Error($"批量读取节点失败: {ex.Message}", ex);
                 _totalErrors++;
             }
-
-            return result;
         }
 
         /// <summary>
@@ -406,211 +351,51 @@ namespace OPC_DA_Agent
             }
         }
 
-        public void Dispose()
-        {
-            Stop();
-
-            try
-            {
-                if (_opcGroup != null)
-                {
-                    var opcItems = _opcGroup.GetType().GetProperty("OPCItems").GetValue(_opcGroup);
-                    var removeAllMethod = opcItems.GetType().GetMethod("RemoveAll");
-                    removeAllMethod.Invoke(opcItems, null);
-                }
-
-                if (_opcServer != null)
-                {
-                    var opcGroups = _opcServer.GetType().GetProperty("OPCGroups").GetValue(_opcServer);
-                    var removeAllMethod = opcGroups.GetType().GetMethod("RemoveAll");
-                    removeAllMethod.Invoke(opcGroups, null);
-
-                    var disconnectMethod = _opcServer.GetType().GetMethod("Disconnect");
-                    disconnectMethod.Invoke(_opcServer, null);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"清理OPC资源失败: {ex.Message}", ex);
-            }
-
-            _opcGroup = null;
-            _opcServer = null;
-
-            _logger.Info("OPC服务已释放");
-        }
-    }
-
-    /// <summary>
-    /// OPC服务器状态枚举
-    /// </summary>
-    public enum OPCServerState
-    {
-        Running = 1,
-        Failed = 2,
-        NoConfig = 3,
-        Suspended = 4,
-        Test = 5
-    }
-}
-        /// </summary>
-        public OPCNodeDetail GetNodeDetail(string nodeId)
-        {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return _browser.GetNodeDetail(nodeId);
-        }
-
         /// <summary>
-        /// 搜索节点
-        /// </summary>
-        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
-        {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return _browser.SearchNodes(searchTerm, maxResults);
-        }
-
-        /// <summary>
-        /// 浏览节点树
-        /// </summary>
-        public OPCNode BrowseTree(string nodeId, int maxDepth = 3)
-        {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return _browser.BrowseTree(nodeId, maxDepth);
-        }
-
-        /// <summary>
-        /// 浏览指定节点的子节点
-        /// </summary>
-        public List<OPCNode> BrowseNode(string nodeId, int depth = 1)
-        {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return _browser.BrowseNode(nodeId, depth);
-        }
-
-        /// <summary>
-        /// 浏览OPC服务器节点
+        /// 浏览OPC服务器节点 - OPC DA不支持浏览，抛出异常
         /// </summary>
         public List<OPCNode> BrowseRoot()
         {
-            if (_browser == null)
-            {
-                throw new InvalidOperationException("浏览器未初始化");
-            }
-            return _browser.BrowseRoot();
-        }
-        }
-            return _browser.ExportAllVariables(maxDepth);
-        }
-            return _browser.GetNodeDetail(nodeId);
-        }
-            return _browser.SearchNodes(searchTerm, maxResults);
-        }
-            return _browser.BrowseTree(nodeId, maxDepth);
-        }
-            return _browser.BrowseNode(nodeId, depth);
-        }
-            return _browser.BrowseRoot();
-        }
-
-        /// <summary>
-        /// 浏览OPC服务器节点
-        /// </summary>
-        public List<OPCNode> BrowseRoot()
-        {
-            // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
-        /// 浏览指定节点的子节点
+        /// 浏览指定节点的子节点 - OPC DA不支持浏览，抛出异常
         /// </summary>
         public List<OPCNode> BrowseNode(string nodeId, int depth = 1)
         {
-            // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
-        /// 浏览节点树
+        /// 浏览节点树 - OPC DA不支持浏览，抛出异常
         /// </summary>
         public OPCNode BrowseTree(string nodeId, int maxDepth = 3)
         {
-            // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
-        /// 搜索节点
+        /// 搜索节点 - OPC DA不支持搜索，抛出异常
         /// </summary>
         public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
         {
-            // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
-        /// 获取节点详细信息
+        /// 获取节点详细信息 - OPC DA不支持，抛出异常
         /// </summary>
         public OPCNodeDetail GetNodeDetail(string nodeId)
         {
-            // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
         /// <summary>
-        /// 导出所有变量节点
+        /// 导出所有变量节点 - OPC DA不支持，抛出异常
         /// </summary>
         public List<TagConfig> ExportAllVariables(int maxDepth = 3)
         {
-            // OPC DA browse is not supported in this implementation
-            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
-        }
-
-        /// <summary>
-        /// 浏览节点树
-        /// </summary>
-        public OPCNode BrowseTree(string nodeId, int maxDepth = 3)
-        {
-            // OPC DA browse is not supported in this implementation
-            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
-        }
-
-        /// <summary>
-        /// 搜索节点
-        /// </summary>
-        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
-        {
-            // OPC DA browse is not supported in this implementation
-            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
-        }
-
-        /// <summary>
-        /// 获取节点详细信息
-        /// </summary>
-        public OPCNodeDetail GetNodeDetail(string nodeId)
-        {
-            // OPC DA browse is not supported in this implementation
-            throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
-        }
-
-        /// <summary>
-        /// 导出所有变量节点
-        /// </summary>
-        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
-        {
-            // OPC DA browse is not supported in this implementation
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
