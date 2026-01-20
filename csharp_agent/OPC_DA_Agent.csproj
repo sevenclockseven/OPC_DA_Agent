@@ -42,17 +42,10 @@
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
-    <!-- 引用 OPC .NET API DLL -->
-    <Reference Include="OpcNetApi">
-      <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-    <Reference Include="OpcNetApi.Com">
-      <HintPath>packages\OPC.NET.API.2.1.1\lib\net20\OpcNetApi.Com.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
-  </ItemGroup>
-  <ItemGroup>
+    <!-- Mock OPC API for GitHub Actions build -->
+    <Compile Include="Mock\OpcNetApi.cs" />
+    <Compile Include="Mock\OpcNetApi.Com.cs" />
+    <!-- Main project files -->
     <Compile Include="Program.cs" />
     <Compile Include="Config.cs" />
     <Compile Include="Logger.cs" />
