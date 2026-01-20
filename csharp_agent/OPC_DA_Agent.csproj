@@ -8,7 +8,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>OPC_DA_Agent</RootNamespace>
     <AssemblyName>OPC_DA_Agent</AssemblyName>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>

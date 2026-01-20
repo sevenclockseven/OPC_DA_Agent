@@ -1,6 +1,6 @@
 using System;
 using System.Threading;
-using System.Threading.Tasks;
+
 
 namespace OPC_DA_Agent
 {
@@ -12,7 +12,7 @@ namespace OPC_DA_Agent
         private static HttpServer _httpServer;
         private static bool _isRunning = true;
 
-        static async Task Main(string[] args)
+        static void Main(string[] args)
         {
             Console.WriteLine("========================================");
             Console.WriteLine("   OPC DA 数据采集代理程序");
@@ -48,7 +48,7 @@ namespace OPC_DA_Agent
                 _opcService = new OPCService(_config, _logger);
 
                 // 连接到OPC服务器
-                if (!await _opcService.ConnectAsync())
+                if (!_opcService.Connect())
                 {
                     _logger.Error("无法连接到OPC服务器，程序退出");
                     return;
@@ -80,7 +80,7 @@ namespace OPC_DA_Agent
                 // 主循环
                 while (_isRunning)
                 {
-                    await Task.Delay(1000);
+                    Thread.Sleep(1000);
                     UpdateStatusDisplay();
                 }
 

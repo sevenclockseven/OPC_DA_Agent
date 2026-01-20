@@ -1,0 +1,105 @@
+name: Build C# OPC DA Agent - Framework Comparison
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  build-net40:
+    name: Build .NET 4.0 (Windows XP)
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Download NuGet
+      run: Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "nuget.exe"
+
+    - name: Configure .NET 4.0
+      run: |
+        # 确保项目使用.NET 4.0
+        (Get-Content "csharp_agent\OPC_DA_Agent.csproj") -replace "v4\.8", "v4.0" | Set-Content "csharp_agent\OPC_DA_Agent.csproj"
+        # 更新包配置
+        (Get-Content "csharp_agent\packages.config") -replace "13\.0\.3", "6.0.4" | Set-Content "csharp_agent\packages.config"
+        Write-Host "Project configured for .NET Framework 4.0"
+
+    - name: Restore NuGet packages (.NET 4.0)
+      run: nuget.exe restore csharp_agent/OPC_DA_Agent.csproj -PackagesDirectory "csharp_agent/packages"
+
+    - name: Build .NET 4.0
+      run: |
+        msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=AnyCPU /p:TargetFrameworkVersion=v4.0
+
+    - name: Upload .NET 4.0 Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: OPC_DA_Agent_NET40
+        path: csharp_agent/bin/
+
+  build-net48:
+    name: Build .NET 4.8 (Modern Windows)
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Restore NuGet packages
+      run: |
+        # 恢复原始配置
+        Copy-Item "csharp_agent\OPC_DA_Agent.csproj.backup" "csharp_agent\OPC_DA_Agent.csproj" -Force
+        Copy-Item "csharp_agent\packages.config.backup" "csharp_agent\packages.config" -Force
+        nuget.exe restore csharp_agent/OPC_DA_Agent.csproj -PackagesDirectory "csharp_agent/packages"
+
+    - name: Build .NET 4.8
+      run: msbuild csharp_agent/OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=AnyCPU
+
+    - name: Upload .NET 4.8 Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: OPC_DA_Agent_NET48
+        path: csharp_agent/bin/
+
+  compare-builds:
+    name: Compare Builds
+    runs-on: ubuntu-latest
+    needs: [build-net40, build-net48]
+    if: always()
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: Compare Results
+      run: |
+        echo "=== Build Comparison ==="
+        
+        # 检查.NET 4.0构建结果
+        if [ -d "OPC_DA_Agent_NET40" ]; then
+          echo "✓ .NET 4.0 (Windows XP): BUILD SUCCESS"
+          ls -la OPC_DA_Agent_NET40/bin/ 2>/dev/null || echo "  (No bin directory found)"
+        else
+          echo "✗ .NET 4.0 (Windows XP): BUILD FAILED"
+        fi
+        
+        echo ""
+        
+        # 检查.NET 4.8构建结果
+        if [ -d "OPC_DA_Agent_NET48" ]; then
+          echo "✓ .NET 4.8 (Modern Windows): BUILD SUCCESS"
+          ls -la OPC_DA_Agent_NET48/bin/ 2>/dev/null || echo "  (No bin directory found)"
+        else
+          echo "✗ .NET 4.8 (Modern Windows): BUILD FAILED"
+        fi
+        
+        echo ""
+        echo "=== Summary ==="
+        echo "Both builds available: $([ -d "OPC_DA_Agent_NET40" ] && [ -d "OPC_DA_Agent_NET48" ] && echo "YES" || echo "NO")"
