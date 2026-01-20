@@ -30,16 +30,38 @@ namespace OPC_DA_Agent
         private readonly Logger _logger;
         private readonly Config _config;
 
-        public bool IsConnected => _opcServer != null && _opcServer.IsConnected; // 检查 API 的连接状态
-        public int TagCount => _tags?.Count ?? 0;
-        public long TotalReads => _totalReads;
-        public long TotalErrors => _totalErrors;
-        public DateTime StartTime => _startTime;
+        public bool IsConnected
+        {
+            get { return _opcServer != null && _opcServer.IsConnected; }
+        }
+        
+        public int TagCount
+        {
+            get { return _tags != null ? _tags.Count : 0; }
+        }
+        
+        public long TotalReads
+        {
+            get { return _totalReads; }
+        }
+        
+        public long TotalErrors
+        {
+            get { return _totalErrors; }
+        }
+        
+        public DateTime StartTime
+        {
+            get { return _startTime; }
+        }
 
         public OPCService(Config config, Logger logger)
         {
-            _config = config ?? throw new ArgumentNullException(nameof(config));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            if (config == null) throw new ArgumentNullException("config");
+            if (logger == null) throw new ArgumentNullException("logger");
+            
+            _config = config;
+            _logger = logger;
             _tags = new List<TagConfig>();
             _lastValues = new Dictionary<string, object>();
             _startTime = DateTime.Now;
