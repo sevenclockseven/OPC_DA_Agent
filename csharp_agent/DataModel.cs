@@ -22,7 +22,10 @@ namespace OPC_DA_Agent
         public string DataType { get; set; }
 
         [JsonProperty("enabled")]
-        public bool Enabled { get; set; } = true;
+        public bool Enabled { get; set; }
+
+        [JsonProperty("active")]
+        public bool Active { get; set; }
     }
 
     /// <summary>
