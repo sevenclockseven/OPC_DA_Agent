@@ -1,0 +1,79 @@
+name: Build C# OPC DA Agent (.NET 4.0 XP Compatible) - Fixed
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  build-net40:
+    name: Build .NET Framework 4.0 (Windows XP Compatible)
+    runs-on: windows-2019
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+      with:
+        msbuild-version: '16.0'
+
+    - name: Create working copy
+      run: |
+        # 创建工作目录
+        New-Item -ItemType Directory -Force -Path 'work\csharp_agent'
+        Copy-Item 'csharp_agent\*' 'work\csharp_agent\' -Recurse -Force
+        
+        # 修改项目配置为.NET 4.0
+        (Get-Content 'work\csharp_agent\OPC_DA_Agent.csproj') -replace 'v4\.8', 'v4.0' | Set-Content 'work\csharp_agent\OPC_DA_Agent.csproj'
+        (Get-Content 'work\csharp_agent\packages.config') -replace '13\.0\.3', '6.0.4' | Set-Content 'work\csharp_agent\packages.config'
+        
+        Write-Host 'Project configured for .NET Framework 4.0'
+
+    - name: Download NuGet CLI
+      run: |
+        if (!(Test-Path 'nuget.exe')) {
+          Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/v5.8.1/nuget.exe' -OutFile 'nuget.exe'
+        }
+
+    - name: Restore NuGet packages
+      run: |
+        New-Item -ItemType Directory -Force -Path 'work\csharp_agent\packages'
+        .\nuget.exe locals all -clear
+        .\nuget.exe restore 'work\csharp_agent\OPC_DA_Agent.csproj' -PackagesDirectory 'work\csharp_agent\packages'
+
+    - name: Build Debug (.NET 4.0)
+      run: |
+        if (Test-Path 'work\csharp_agent\bin') {
+          Remove-Item -Recurse -Force 'work\csharp_agent\bin' -ErrorAction SilentlyContinue
+        }
+        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Debug /p:Platform=AnyCPU /v:minimal
+
+    - name: Build Release (.NET 4.0)
+      run: |
+        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Release /p:Platform=AnyCPU /v:minimal
+
+    - name: Verify builds
+      run: |
+        if (Test-Path 'work\csharp_agent\bin\Debug\OPC_DA_Agent.exe') {
+          Write-Host '✓ Debug build successful'
+        } else {
+          Write-Host '✗ Debug build failed'
+          exit 1
+        }
+        if (Test-Path 'work\csharp_agent\bin\Release\OPC_DA_Agent.exe') {
+          Write-Host '✓ Release build successful'
+        } else {
+          Write-Host '✗ Release build failed'
+          exit 1
+        }
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: OPC_DA_Agent_NET40
+        path: work\csharp_agent\bin/
+        retention-days: 90
