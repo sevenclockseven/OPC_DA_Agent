@@ -30,7 +30,7 @@ namespace OPC_DA_Agent
             _logger = logger ?? throw new ArgumentNullException(logger);
 
             _listener = new HttpListener();
-            _listener.Prefixes.Add("+  +""http://+:{_config.HttpPort}/");
+            _listener.Prefixes.Add(string.Format("http://+:{0}/", _config.HttpPort));
             _cts = new CancellationTokenSource();
         }
 
