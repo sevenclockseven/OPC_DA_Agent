@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
+
 using OpcNetApi;
 using OpcNetApi.Com;
 
@@ -48,7 +48,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 连接到OPC DA服务器
         /// </summary>
-        public async Task<bool> ConnectAsync()
+        public bool<bool> ConnectAsync()
         {
             try
             {
@@ -208,7 +208,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 更新数据（定时执行）
         /// </summary>
-        private async Task UpdateDataAsync()
+        private bool UpdateDataAsync()
         {
             if (!_isRunning || !IsConnected) return;
 
@@ -222,7 +222,7 @@ namespace OPC_DA_Agent
                 for (int i = 0; i < enabledTags.Count; i += batchSize)
                 {
                     var batch = enabledTags.Skip(i).Take(batchSize).ToList();
-                    await ReadBatchAsync(batch);
+                     ReadBatchAsync(batch);
                 }
 
                 _totalReads++;
@@ -237,9 +237,9 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 批量读取数据
         /// </summary>
-        private async Task ReadBatchAsync(List<TagConfig> tags)
+        private bool ReadBatchAsync(List<TagConfig> tags)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
 
             try
             {
@@ -371,9 +371,9 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 读取指定节点
         /// </summary>
-        public async Task<List<TagValue>> ReadNodesAsync(List<string> nodeIds)
+        public bool<List<TagValue>> ReadNodesAsync(List<string> nodeIds)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
 
             var result = new List<TagValue>();
 
@@ -384,7 +384,7 @@ namespace OPC_DA_Agent
                 for (int i = 0; i < nodeIds.Count; i += batchSize)
                 {
                     var batch = nodeIds.Skip(i).Take(batchSize).ToList();
-                    var batchResult = await ReadBatchAsyncWithNodeIds(batch);
+                    var batchResult =  ReadBatchAsyncWithNodeIds(batch);
                     result.AddRange(batchResult);
                 }
 
@@ -401,9 +401,9 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 批量读取指定节点
         /// </summary>
-        private async Task<List<TagValue>> ReadBatchAsyncWithNodeIds(List<string> nodeIds)
+        private bool<List<TagValue>> ReadBatchAsyncWithNodeIds(List<string> nodeIds)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
 
             var result = new List<TagValue>();
 
@@ -453,45 +453,45 @@ namespace OPC_DA_Agent
         }
 
         // 添加浏览相关的方法（返回空实现，因为OPC DA不支持浏览）
-        public async Task<List<OPCNode>> BrowseRootAsync()
+        public bool<List<OPCNode>> BrowseRootAsync()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
-        public async Task<List<OPCNode>> BrowseNodeAsync(string nodeId, int depth = 1)
+        public bool<List<OPCNode>> BrowseNodeAsync(string nodeId, int depth = 1)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
-        public async Task<OPCNode> BrowseTreeAsync(string nodeId, int maxDepth = 3)
+        public bool<OPCNode> BrowseTreeAsync(string nodeId, int maxDepth = 3)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
-        public async Task<List<OPCNode>> SearchNodesAsync(string searchTerm, int maxResults = 1000)
+        public bool<List<OPCNode>> SearchNodesAsync(string searchTerm, int maxResults = 1000)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
-        public async Task<OPCNodeDetail> GetNodeDetailAsync(string nodeId)
+        public bool<OPCNodeDetail> GetNodeDetailAsync(string nodeId)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
-        public async Task<List<TagConfig>> ExportAllVariablesAsync(int maxDepth = 3)
+        public bool<List<TagConfig>> ExportAllVariablesAsync(int maxDepth = 3)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             throw new NotImplementedException("OPC DA browsing is not implemented. Use OPC UA server for browsing.");
         }
 
-        public async Task<bool> ReloadConfigAsync()
+        public bool<bool> ReloadConfigAsync()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             void; // 避免CS1998警告
             return ReloadConfig();
         }
 

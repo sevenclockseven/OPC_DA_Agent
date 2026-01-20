@@ -4,7 +4,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
+
 using Newtonsoft.Json;
 
 namespace OPC_DA_Agent
@@ -25,12 +25,12 @@ namespace OPC_DA_Agent
 
         public HttpServer(Config config, OPCService opcService, Logger logger)
         {
-            _config = config ?? throw new ArgumentNullException(nameof(config));
-            _opcService = opcService ?? throw new ArgumentNullException(nameof(opcService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _config = config ?? throw new ArgumentNullException(config);
+            _opcService = opcService ?? throw new ArgumentNullException(opcService);
+            _logger = logger ?? throw new ArgumentNullException(logger);
 
             _listener = new HttpListener();
-            _listener.Prefixes.Add($"http://+:{_config.HttpPort}/");
+            _listener.Prefixes.Add("+  +""http://+:{_config.HttpPort}/");
             _cts = new CancellationTokenSource();
         }
 
@@ -59,15 +59,15 @@ namespace OPC_DA_Agent
                 _isRunning = true;
 
                 // 启动请求处理任务
-                Task.Run(() => HandleRequestsAsync(_cts.Token));
+                new Thread(().Start() => HandleRequestsAsync(_cts.Token));
 
-                _logger.Info($"HTTP服务器已启动，监听端口: {_config.HttpPort}");
-                _logger.Info($"访问地址: http://localhost:{_config.HttpPort}/");
+                _logger.Info("+  +""HTTP服务器已启动，监听端口: {_config.HttpPort}");
+                _logger.Info("+  +""访问地址: http://localhost:{_config.HttpPort}/");
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.Error($"启动HTTP服务器失败: {ex.Message}", ex);
+                _logger.Error("+  +""启动HTTP服务器失败: {ex.Message}", ex);
                 if (ex is HttpListenerException hlex && hlex.ErrorCode == 5)
                 {
                     _logger.Error("需要管理员权限，请以管理员身份运行此程序");
@@ -93,7 +93,7 @@ namespace OPC_DA_Agent
             }
             catch (Exception ex)
             {
-                _logger.Error($"停止HTTP服务器失败: {ex.Message}", ex);
+                _logger.Error("+  +""停止HTTP服务器失败: {ex.Message}", ex);
             }
 
             _logger.Info("HTTP服务器已停止");
@@ -102,20 +102,20 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 处理HTTP请求
         /// </summary>
-        private async Task HandleRequestsAsync(CancellationToken token)
+        private void HandleRequestsAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested && _isRunning)
             {
                 try
                 {
-                    var context = await _listener.GetContextAsync();
-                    _ = Task.Run(() => ProcessRequestAsync(context, token), token);
+                    var context =  _listener.GetContextAsync();
+                    _ = new Thread(().Start() => ProcessRequestAsync(context, token), token);
                 }
                 catch (Exception ex) when (ex is HttpListenerException || ex is ObjectDisposedException)
                 {
                     if (_isRunning)
                     {
-                        _logger.Error($"获取请求上下文失败: {ex.Message}", ex);
+                        _logger.Error("+  +""获取请求上下文失败: {ex.Message}", ex);
                     }
                     break;
                 }
@@ -125,7 +125,7 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 处理单个请求
         /// </summary>
-        private async Task ProcessRequestAsync(HttpListenerContext context, CancellationToken token)
+        private void ProcessRequestAsync(HttpListenerContext context, CancellationToken token)
         {
             var request = context.Request;
             var response = context.Response;
@@ -134,7 +134,7 @@ namespace OPC_DA_Agent
             {
                 Interlocked.Increment(ref _requestCount);
 
-                _logger.Debug($"收到请求: {request.HttpMethod} {request.Url.PathAndQuery}");
+                _logger.Debug("+  +""收到请求: {request.HttpMethod} {request.Url.PathAndQuery}");
 
                 // 设置响应头
                 response.ContentType = "application/json; charset=utf-8";
@@ -159,59 +159,59 @@ namespace OPC_DA_Agent
 
                 if (method == "GET" && path == "/api/status")
                 {
-                    apiResponse = await HandleGetStatus();
+                    apiResponse =  HandleGetStatus();
                 }
                 else if (method == "GET" && path == "/api/data")
                 {
-                    apiResponse = await HandleGetData();
+                    apiResponse =  HandleGetData();
                 }
                 else if (method == "GET" && path == "/api/data/list")
                 {
-                    apiResponse = await HandleGetDataList();
+                    apiResponse =  HandleGetDataList();
                 }
                 else if (method == "POST" && path == "/api/data/batch")
                 {
-                    apiResponse = await HandleBatchRead(request);
+                    apiResponse =  HandleBatchRead(request);
                 }
                 else if (method == "GET" && path == "/api/tags")
                 {
-                    apiResponse = await HandleGetTags();
+                    apiResponse =  HandleGetTags();
                 }
                 else if (method == "POST" && path == "/api/reload")
                 {
-                    apiResponse = await HandleReload();
+                    apiResponse =  HandleReload();
                 }
                 else if (method == "POST" && path == "/api/config")
                 {
-                    apiResponse = await HandleUpdateConfig(request);
+                    apiResponse =  HandleUpdateConfig(request);
                 }
                 else if (method == "GET" && path == "/api/browse")
                 {
-                    apiResponse = await HandleBrowseRoot();
+                    apiResponse =  HandleBrowseRoot();
                 }
                 else if (method == "GET" && path.StartsWith("/api/browse/node"))
                 {
-                    apiResponse = await HandleBrowseNode(request);
+                    apiResponse =  HandleBrowseNode(request);
                 }
                 else if (method == "GET" && path.StartsWith("/api/browse/tree"))
                 {
-                    apiResponse = await HandleBrowseTree(request);
+                    apiResponse =  HandleBrowseTree(request);
                 }
                 else if (method == "GET" && path.StartsWith("/api/search"))
                 {
-                    apiResponse = await HandleSearch(request);
+                    apiResponse =  HandleSearch(request);
                 }
                 else if (method == "GET" && path.StartsWith("/api/node"))
                 {
-                    apiResponse = await HandleGetNodeDetail(request);
+                    apiResponse =  HandleGetNodeDetail(request);
                 }
                 else if (method == "POST" && path == "/api/export")
                 {
-                    apiResponse = await HandleExportVariables(request);
+                    apiResponse =  HandleExportVariables(request);
                 }
                 else if (method == "POST" && path == "/api/save-tags")
                 {
-                    apiResponse = await HandleSaveTags(request);
+                    apiResponse =  HandleSaveTags(request);
                 }
                 else if (path == "/" || path == "/api")
                 {
@@ -250,23 +250,23 @@ namespace OPC_DA_Agent
                     var buffer = Encoding.UTF8.GetBytes(json);
 
                     response.ContentLength64 = buffer.Length;
-                    await response.OutputStream.WriteAsync(buffer, 0, buffer.Length, token);
+                     response.OutputStream.WriteAsync(buffer, 0, buffer.Length, token);
                 }
 
                 response.Close();
             }
             catch (Exception ex)
             {
-                _logger.Error($"处理请求失败: {ex.Message}", ex);
+                _logger.Error("+  +""处理请求失败: {ex.Message}", ex);
 
                 try
                 {
                     response.StatusCode = 500;
-                    var errorResponse = ApiResponse.ErrorResponse($"服务器错误: {ex.Message}");
+                    var errorResponse = ApiResponse.ErrorResponse("+  +""服务器错误: {ex.Message}");
                     var json = JsonConvert.SerializeObject(errorResponse);
                     var buffer = Encoding.UTF8.GetBytes(json);
                     response.ContentLength64 = buffer.Length;
-                    await response.OutputStream.WriteAsync(buffer, 0, buffer.Length, token);
+                     response.OutputStream.WriteAsync(buffer, 0, buffer.Length, token);
                     response.Close();
                 }
                 catch { }
@@ -276,9 +276,9 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 处理：获取状态
         /// </summary>
-        private async Task<ApiResponse> HandleGetStatus()
+        private ApiResponse HandleGetStatus()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             var status = _opcService.GetStatus();
             return ApiResponse.SuccessResponse(status);
         }
@@ -288,7 +288,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetData()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             var data = _opcService.GetCurrentData();
             return ApiResponse.SuccessResponse(data);
         }
@@ -298,7 +298,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetDataList()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             var data = _opcService.GetCurrentDataList();
             var response = new BatchDataResponse
             {
@@ -318,7 +318,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var body = await ReadRequestBody(request);
+                var body =  ReadRequestBody(request);
                 var batchRequest = JsonConvert.DeserializeObject<BatchReadRequest>(body);
 
                 if (batchRequest.NodeIds == null || batchRequest.NodeIds.Count == 0)
@@ -327,7 +327,7 @@ namespace OPC_DA_Agent
                 }
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var data = await _opcService.ReadNodesAsync(batchRequest.NodeIds);
+                var data =  _opcService.ReadNodesAsync(batchRequest.NodeIds);
                 sw.Stop();
 
                 var response = new BatchDataResponse
@@ -343,7 +343,7 @@ namespace OPC_DA_Agent
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"批量读取失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""批量读取失败: {ex.Message}");
             }
         }
 
@@ -352,7 +352,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetTags()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             // 返回当前配置的标签
             var tags = _opcService.TagCount > 0 ? _config.Tags : new List<TagConfig>();
             return ApiResponse.SuccessResponse(tags);
@@ -363,7 +363,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleReload()
         {
-            var success = await _opcService.ReloadConfigAsync();
+            var success =  _opcService.ReloadConfigAsync();
             if (success)
             {
                 return ApiResponse.SuccessResponse(null, "配置已重新加载");
@@ -381,7 +381,7 @@ namespace OPC_DA_Agent
         {
             try
             {
-                var body = await ReadRequestBody(request);
+                var body =  ReadRequestBody(request);
                 var updateRequest = JsonConvert.DeserializeObject<ConfigUpdateRequest>(body);
 
                 if (updateRequest.UpdateIntervalMs.HasValue)
@@ -403,7 +403,7 @@ namespace OPC_DA_Agent
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"更新配置失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""更新配置失败: {ex.Message}");
             }
         }
 
@@ -412,15 +412,15 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleBrowseRoot()
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
-                var nodes = await _opcService.BrowseRootAsync();
+                var nodes =  _opcService.BrowseRootAsync();
                 return ApiResponse.SuccessResponse(nodes);
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"浏览根节点失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""浏览根节点失败: {ex.Message}");
             }
         }
 
@@ -429,7 +429,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleBrowseNode(HttpListenerRequest request)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
                 var nodeId = GetQueryParam(request.Url.Query, "nodeId");
@@ -446,12 +446,12 @@ namespace OPC_DA_Agent
                     int.TryParse(depthStr, out depth);
                 }
 
-                var nodes = await _opcService.BrowseNodeAsync(nodeId, depth);
+                var nodes =  _opcService.BrowseNodeAsync(nodeId, depth);
                 return ApiResponse.SuccessResponse(nodes);
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"浏览节点失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""浏览节点失败: {ex.Message}");
             }
         }
 
@@ -460,7 +460,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleBrowseTree(HttpListenerRequest request)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
                 var nodeId = GetQueryParam(request.Url.Query, "nodeId");
@@ -477,12 +477,12 @@ namespace OPC_DA_Agent
                     int.TryParse(maxDepthStr, out maxDepth);
                 }
 
-                var tree = await _opcService.BrowseTreeAsync(nodeId, maxDepth);
+                var tree =  _opcService.BrowseTreeAsync(nodeId, maxDepth);
                 return ApiResponse.SuccessResponse(tree);
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"浏览节点树失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""浏览节点树失败: {ex.Message}");
             }
         }
 
@@ -491,7 +491,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleSearch(HttpListenerRequest request)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
                 var searchTerm = GetQueryParam(request.Url.Query, "q");
@@ -508,12 +508,12 @@ namespace OPC_DA_Agent
                     int.TryParse(maxResultsStr, out maxResults);
                 }
 
-                var nodes = await _opcService.SearchNodesAsync(searchTerm, maxResults);
+                var nodes =  _opcService.SearchNodesAsync(searchTerm, maxResults);
                 return ApiResponse.SuccessResponse(nodes);
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"搜索节点失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""搜索节点失败: {ex.Message}");
             }
         }
 
@@ -522,7 +522,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleGetNodeDetail(HttpListenerRequest request)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
                 var nodeId = GetQueryParam(request.Url.Query, "nodeId");
@@ -532,12 +532,12 @@ namespace OPC_DA_Agent
                     return ApiResponse.ErrorResponse("nodeId参数不能为空");
                 }
 
-                var detail = await _opcService.GetNodeDetailAsync(nodeId);
+                var detail =  _opcService.GetNodeDetailAsync(nodeId);
                 return ApiResponse.SuccessResponse(detail);
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"获取节点详细信息失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""获取节点详细信息失败: {ex.Message}");
             }
         }
 
@@ -546,7 +546,7 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleExportVariables(HttpListenerRequest request)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
                 var maxDepthStr = GetQueryParam(request.Url.Query, "maxDepth");
@@ -557,7 +557,7 @@ namespace OPC_DA_Agent
                     int.TryParse(maxDepthStr, out maxDepth);
                 }
 
-                var tags = await _opcService.ExportAllVariablesAsync(maxDepth);
+                var tags =  _opcService.ExportAllVariablesAsync(maxDepth);
                 return ApiResponse.SuccessResponse(new
                 {
                     count = tags.Count,
@@ -566,7 +566,7 @@ namespace OPC_DA_Agent
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"导出变量节点失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""导出变量节点失败: {ex.Message}");
             }
         }
 
@@ -575,10 +575,10 @@ namespace OPC_DA_Agent
         /// </summary>
         private async Task<ApiResponse> HandleSaveTags(HttpListenerRequest request)
         {
-            await Task.CompletedTask; // 避免CS1998警告
+             ; // 避免CS1998警告
             try
             {
-                var body = await ReadRequestBody(request);
+                var body =  ReadRequestBody(request);
                 var tags = JsonConvert.DeserializeObject<List<TagConfig>>(body);
 
                 if (tags == null || tags.Count == 0)
@@ -592,13 +592,13 @@ namespace OPC_DA_Agent
                 System.IO.File.WriteAllText(tagsFile, json);
 
                 // 重新加载配置
-                var reloadSuccess = await _opcService.ReloadConfigAsync();
+                var reloadSuccess =  _opcService.ReloadConfigAsync();
 
-                return ApiResponse.SuccessResponse(null, $"已保存 {tags.Count} 个标签并重新加载");
+                return ApiResponse.SuccessResponse(null, "+  +""已保存 {tags.Count} 个标签并重新加载");
             }
             catch (Exception ex)
             {
-                return ApiResponse.ErrorResponse($"保存标签失败: {ex.Message}");
+                return ApiResponse.ErrorResponse("+  +""保存标签失败: {ex.Message}");
             }
         }
 
@@ -638,7 +638,7 @@ namespace OPC_DA_Agent
         {
             using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
             {
-                return await reader.ReadToEndAsync();
+                return  reader.ReadToEndAsync();
             }
         }
 
