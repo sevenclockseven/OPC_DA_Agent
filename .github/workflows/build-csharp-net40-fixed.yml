@@ -10,7 +10,7 @@ on:
 jobs:
   build-net40:
     name: Build .NET Framework 4.0 (Windows XP Compatible)
-    runs-on: windows-2019
+    runs-on: windows-2022
     
     steps:
     - name: Checkout code

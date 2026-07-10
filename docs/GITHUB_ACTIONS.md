@@ -150,7 +150,7 @@ OPC_DA_Agent.exe --config config.json
 
 ## 环境要求
 
-- **Runner**: windows-2019
+- **Runner**: windows-2022
 - **.NET Framework**: 4.8（Windows 自带）
 - **MSBuild**: Visual Studio 自带
 - **NuGet**: Actions 环境自带
