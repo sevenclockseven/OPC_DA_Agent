@@ -320,3 +320,30 @@ public class OPCNodeDetail
     [JsonProperty("item_id")]
     public string ItemId { get; set; }
 }
+
+    /// <summary>
+    /// 系统状态 DTO（/api/status 返回）。
+    /// C# 属性用 PascalCase（Program.cs 直接点属性），JSON 键有意保留 camelCase，
+    /// 以维持既有 API 契约不被破坏。
+    /// </summary>
+    public class StatusInfo
+    {
+        [JsonProperty("isConnected")]
+        public bool IsConnected { get; set; }
+
+        [JsonProperty("tagCount")]
+        public int TagCount { get; set; }
+
+        [JsonProperty("totalReads")]
+        public long TotalRequests { get; set; }
+
+        [JsonProperty("totalErrors")]
+        public long ErrorCount { get; set; }
+
+        [JsonProperty("uptimeSeconds")]
+        public double UptimeSeconds { get; set; }
+
+        [JsonProperty("memoryUsageMb")]
+        public double MemoryUsageMb { get; set; }
+    }
+}

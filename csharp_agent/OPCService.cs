@@ -209,16 +209,16 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 获取状态信息
         /// </summary>
-        public object GetStatus()
+        public StatusInfo GetStatus()
         {
-            return new
+            return new StatusInfo
             {
-                isConnected = IsConnected,
-                tagCount = TagCount,
-                totalReads = TotalReads,
-                totalErrors = TotalErrors,
-                uptimeSeconds = (DateTime.Now - StartTime).TotalSeconds,
-                memoryUsageMb = GC.GetTotalMemory(false) / (1024 * 1024)
+                IsConnected = IsConnected,
+                TagCount = TagCount,
+                TotalRequests = TotalReads,
+                ErrorCount = TotalErrors,
+                UptimeSeconds = (DateTime.Now - StartTime).TotalSeconds,
+                MemoryUsageMb = GC.GetTotalMemory(false) / (1024.0 * 1024.0)
             };
         }
 
