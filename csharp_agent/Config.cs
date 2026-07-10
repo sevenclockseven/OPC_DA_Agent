@@ -157,10 +157,7 @@ namespace OPC_DA_Agent
                 errors.Add("批次大小必须大于0");
             }
 
-            if (Tags.Count == 0 && string.IsNullOrEmpty(TagsFile))
-            {
-                errors.Add("必须配置标签或指定标签文件路径");
-            }
+            // 允许 tags 为空：用户可以先启动程序连接 OPC 服务器，再通过 Web UI 浏览并选择标签
 
             return errors.Count == 0;
         }

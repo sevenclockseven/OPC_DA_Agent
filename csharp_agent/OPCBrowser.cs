@@ -1,19 +1,19 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Runtime.InteropServices;
 
+using OpcNetApi;
 
 namespace OPC_DA_Agent
 {
     /// <summary>
-    /// OPC浏览器 - 用于浏览OPC服务器上的所有节点
-    /// 注意：OPC DA的浏览功能有限，主要通过标签名称访问
+    /// OPC 节点（已在 DataModel.cs 中定义，此处不再重复定义）
     /// </summary>
     public class OPCBrowser : IDisposable
     {
-        private object _opcServer;
         private readonly Logger _logger;
         private readonly Config _config;
+        private object _opcServer;
 
         public OPCBrowser(Config config, Logger logger)
         {
@@ -21,233 +21,122 @@ namespace OPC_DA_Agent
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        /// <summary>
-        /// 连接到OPC服务器
-        /// </summary>
+        /// <summary>连接到 OPC 服务器（通过 COM Interop）</summary>
         public bool Connect()
         {
             try
             {
-                _logger.Info($"正在连接到OPC服务器: {_config.OpcServerProgId}");
+                _logger.Info(string.Format("正在连接到OPC服务器: {0}", _config.OpcServerProgId));
 
-                _opcServer = Activator.CreateInstance(Type.GetTypeFromProgID("OPCServer"));
-                var connectMethod = _opcServer.GetType().GetMethod("Connect");
-                connectMethod.Invoke(_opcServer, new object[] { _config.OpcServerProgId });
+                Type serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
+                if (serverType == null)
+                {
+                    _logger.Error(string.Format("找不到OPC服务器ProgID: {0}", _config.OpcServerProgId));
+                    return false;
+                }
 
-                _logger.Info($"成功连接到OPC服务器");
+                _opcServer = Activator.CreateInstance(serverType);
+                _logger.Info("已连接到OPC服务器");
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.Error($"连接OPC服务器失败: {ex.Message}", ex);
+                _logger.Error(string.Format("连接OPC服务器失败: {0}", ex.Message), ex);
                 return false;
             }
         }
 
-        /// <summary>
-        /// 浏览根节点下的所有节点
-        /// 注意：OPC DA不支持标准浏览，返回空列表
-        /// </summary>
+        /// <summary>浏览根节点</summary>
         public List<OPCNode> BrowseRoot()
         {
+            return BrowseNode(null);
+        }
+
+        /// <summary>浏览指定节点的子节点</summary>
+        public List<OPCNode> BrowseNode(string nodeId)
+        {
             if (_opcServer == null)
-            {
                 throw new InvalidOperationException("未连接到OPC服务器");
-            }
+
+            var result = new List<OPCNode>();
 
             try
             {
-                _logger.Info("OPC DA浏览功能有限，建议使用标签名称直接访问");
-                return new List<OPCNode>();
+                var browser = (IOPCBrowseServerAddressSpace)_opcServer;
+
+                OPCNAMESPACETYPE nsType;
+                browser.QueryOrganization(out nsType);
+
+                if (string.IsNullOrEmpty(nodeId))
+                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
+                else
+                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, nodeId);
+
+                result.AddRange(DoBrowse(browser, OPCBROWSETYPE.OPC_BRANCH, true));
+                result.AddRange(DoBrowse(browser, OPCBROWSETYPE.OPC_LEAF, false));
             }
             catch (Exception ex)
             {
-                _logger.Error($"浏览根节点失败: {ex.Message}", ex);
-                throw;
+                _logger.Error(string.Format("浏览节点失败: {0}", nodeId ?? "(root)"), ex);
             }
+
+            return result;
         }
 
-        /// <summary>
-        /// 浏览指定节点的子节点
-        /// 注意：OPC DA不支持标准浏览，返回空列表
-        /// </summary>
-        public List<OPCNode> BrowseNode(string nodeId, int depth = 1)
+        private List<OPCNode> DoBrowse(IOPCBrowseServerAddressSpace browser, OPCBROWSETYPE type, bool isFolder)
         {
-            if (_opcServer == null)
-            {
-                throw new InvalidOperationException("未连接到OPC服务器");
-            }
+            var result = new List<OPCNode>();
 
-            try
-            {
-                _logger.Debug($"OPC DA浏览功能有限，建议使用标签名称直接访问: {nodeId}");
-                return new List<OPCNode>();
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"浏览节点失败: {ex.Message}", ex);
-                throw;
-            }
-        }
+            OpcNetApi.Com.IEnumString enumStr;
+            browser.BrowseOPCItemIDs(type, "", 0, 0, out enumStr);
 
-        /// <summary>
-        /// 递归浏览节点树
-        /// 注意：OPC DA不支持标准浏览，返回null
-        /// </summary>
-        public OPCNode BrowseTree(string nodeId, int maxDepth = 3, int currentDepth = 0)
-        {
-            if (_opcServer == null)
-            {
-                throw new InvalidOperationException("未连接到OPC服务器");
-            }
+            if (enumStr == null) return result;
 
-            try
-            {
-                _logger.Debug($"OPC DA浏览功能有限，建议使用标签名称直接访问: {nodeId}");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"浏览节点树失败: {ex.Message}", ex);
-                return null;
-            }
-        }
+            const int batch = 100;
+            string[] buf = new string[batch];
+            int fetched;
 
-        /// <summary>
-        /// 搜索包含指定名称的节点
-        /// 注意：OPC DA不支持标准搜索，返回空列表
-        /// </summary>
-        public List<OPCNode> SearchNodes(string searchTerm, int maxResults = 1000)
-        {
-            if (_opcServer == null)
+            do
             {
-                throw new InvalidOperationException("未连接到OPC服务器");
-            }
-
-            try
-            {
-                _logger.Info($"OPC DA搜索功能有限，建议使用标签名称直接访问: {searchTerm}");
-                return new List<OPCNode>();
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"搜索节点失败: {ex.Message}", ex);
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// 获取节点详细信息
-        /// 注意：OPC DA不支持标准节点信息，返回基本信息
-        /// </summary>
-        public OPCNodeDetail GetNodeDetail(string nodeId)
-        {
-            if (_opcServer == null)
-            {
-                throw new InvalidOperationException("未连接到OPC服务器");
-            }
-
-            try
-            {
-                _logger.Debug($"OPC DA节点详情功能有限，返回基本信息: {nodeId}");
-
-                var detail = new OPCNodeDetail
+                enumStr.Next(batch, buf, out fetched);
+                for (int i = 0; i < fetched; i++)
                 {
-                    NodeId = nodeId,
-                    DisplayName = nodeId,
-                    Description = "OPC DA标签",
-                    DataType = "Unknown",
-                    ValueRank = 0,
-                    AccessLevel = "Read",
-                    UserAccessLevel = "Read"
-                };
+                    string itemId = buf[i];
+                    try
+                    {
+                        string fullId;
+                        browser.GetItemID(buf[i], out fullId);
+                        itemId = fullId ?? buf[i];
+                    }
+                    catch { }
 
-                return detail;
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"获取节点详细信息失败: {ex.Message}", ex);
-                throw;
-            }
-        }
+                    result.Add(new OPCNode
+                    {
+                        NodeId = itemId,
+                        Name = buf[i],
+                        Description = isFolder ? "分支" : "标签",
+                        IsFolder = isFolder,
+                        HasChildren = isFolder,
+                        Children = isFolder ? new List<OPCNode>() : null
+                    });
+                }
+            } while (fetched == batch);
 
-        /// <summary>
-        /// 导出所有变量节点到文件
-        /// 注意：OPC DA不支持标准浏览，返回空列表
-        /// </summary>
-        public List<TagConfig> ExportAllVariables(int maxDepth = 3)
-        {
-            if (_opcServer == null)
-            {
-                throw new InvalidOperationException("未连接到OPC服务器");
-            }
-
-            try
-            {
-                _logger.Info("OPC DA浏览功能有限，无法导出所有变量节点");
-                return new List<TagConfig>();
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"导出变量节点失败: {ex.Message}", ex);
-                throw;
-            }
+            return result;
         }
 
         public void Dispose()
         {
-            try
+            if (_opcServer != null)
             {
-                if (_opcServer != null)
+                try
                 {
-                    var disconnectMethod = _opcServer.GetType().GetMethod("Disconnect");
-                    disconnectMethod.Invoke(_opcServer, null);
+                    if (Marshal.IsComObject(_opcServer))
+                        Marshal.ReleaseComObject(_opcServer);
                 }
+                catch { }
+                _opcServer = null;
             }
-            catch (Exception ex)
-            {
-                _logger.Error($"清理OPC浏览器资源失败: {ex.Message}", ex);
-            }
-
-            _opcServer = null;
         }
-    }
-
-    /// <summary>
-    /// OPC节点信息
-    /// </summary>
-    public class OPCNode
-    {
-        public string NodeId { get; set; }
-        public string DisplayName { get; set; }
-        public string NodeClass { get; set; }
-        public string BrowseName { get; set; }
-        public string Description { get; set; }
-        public bool IsForward { get; set; }
-        public string ReferenceTypeId { get; set; }
-        public int Depth { get; set; }
-        public List<OPCNode> Children { get; set; } = new List<OPCNode>();
-
-        public string GetNodeClassName()
-        {
-            return "变量";
-        }
-    }
-
-    /// <summary>
-    /// OPC节点详细信息
-    /// </summary>
-    public class OPCNodeDetail
-    {
-        public string NodeId { get; set; }
-        public string DisplayName { get; set; }
-        public string Description { get; set; }
-        public string DataType { get; set; }
-        public int ValueRank { get; set; }
-        public string AccessLevel { get; set; }
-        public string UserAccessLevel { get; set; }
-        public object CurrentValue { get; set; }
-        public string CurrentQuality { get; set; }
-        public DateTime CurrentTimestamp { get; set; }
     }
 }

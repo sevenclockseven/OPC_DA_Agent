@@ -45,16 +45,19 @@ namespace OPC_DA_Agent
                 _logger.Info("程序启动");
 
                 // 初始化OPC服务
-                _opcService = new OPCService(_config, _logger);
+                _opcService = new OPCService(_config, _logger, configPath);
 
                 // 连接到OPC服务器
                 if (!_opcService.Connect())
                 {
                     _logger.Error("无法连接到OPC服务器，程序退出");
+                    Console.WriteLine("无法连接到OPC服务器，请检查配置。");
+                    Console.WriteLine("按任意键退出...");
+                    Console.ReadKey();
                     return;
                 }
 
-                // 启动数据采集
+                // 启动数据采集（tags 为空时也可以启动，仅创建 Group，之后通过 Web UI 添加标签）
                 if (!_opcService.Start())
                 {
                     _logger.Error("无法启动数据采集，程序退出");
@@ -161,9 +164,13 @@ namespace OPC_DA_Agent
             Console.WriteLine($"  日志文件: {_config.LogFile}");
             Console.WriteLine();
             Console.WriteLine("可用API端点:");
-            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/status");
-            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/data");
-            Console.WriteLine($"  POST http://localhost:{_config.HttpPort}/api/data/batch");
+            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/              Web UI（浏览选择标签）");
+            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/status   系统状态");
+            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/data     采集数据");
+            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/browse   浏览根节点");
+            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/browse/node?nodeId=xxx  浏览子节点");
+            Console.WriteLine($"  GET  http://localhost:{_config.HttpPort}/api/tags     当前标签列表");
+            Console.WriteLine($"  POST http://localhost:{_config.HttpPort}/api/tags     保存标签配置");
             Console.WriteLine();
             Console.WriteLine("按 Ctrl+C 停止程序");
             Console.WriteLine();

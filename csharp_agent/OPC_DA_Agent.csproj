@@ -45,7 +45,7 @@
     <Reference Include="Newtonsoft.Json">
       <HintPath>packages\Newtonsoft.Json.13.0.3\lib\net40\Newtonsoft.Json.dll</HintPath>
     </Reference>
-    <!-- Mock OPC API for GitHub Actions build -->
+    <!-- OPC DA COM 互操作接口（编译时声明，运行时连接真实 OPC 服务器） -->
     <Compile Include="Mock\OpcNetApi.cs" />
     <Compile Include="Mock\OpcNetApi.Com.cs" />
     <!-- Main project files -->
@@ -53,6 +53,7 @@
     <Compile Include="Config.cs" />
     <Compile Include="Logger.cs" />
     <Compile Include="OPCService.cs" />
+    <Compile Include="OPCBrowser.cs" />
     <Compile Include="HttpServer.cs" />
     <Compile Include="DataModel.cs" />
   </ItemGroup>
