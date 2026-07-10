@@ -41,6 +41,10 @@
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
+    <!-- Newtonsoft.Json：packages.config 还原后由 HintPath 显式引用（旧式 csproj 不会自动注入） -->
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>packages\Newtonsoft.Json.6.0.4\lib\net40\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <!-- Mock OPC API for GitHub Actions build -->
     <Compile Include="Mock\OpcNetApi.cs" />
     <Compile Include="Mock\OpcNetApi.Com.cs" />

@@ -27,11 +27,7 @@ jobs:
         New-Item -ItemType Directory -Force -Path 'work\csharp_agent'
         Copy-Item 'csharp_agent\*' 'work\csharp_agent\' -Recurse -Force
         
-        # 修改项目配置为.NET 4.0
-        (Get-Content 'work\csharp_agent\OPC_DA_Agent.csproj') -replace 'v4\.8', 'v4.0' | Set-Content 'work\csharp_agent\OPC_DA_Agent.csproj'
-        (Get-Content 'work\csharp_agent\packages.config') -replace '13\.0\.3', '6.0.4' | Set-Content 'work\csharp_agent\packages.config'
-        
-        Write-Host 'Project configured for .NET Framework 4.0'
+        Write-Host 'Project configured for .NET Framework 4.0 (XP compatible)'
 
     - name: Download NuGet CLI
       run: |
@@ -45,16 +41,26 @@ jobs:
         .\nuget.exe locals all -clear
         .\nuget.exe restore 'work\csharp_agent\OPC_DA_Agent.csproj' -PackagesDirectory 'work\csharp_agent\packages'
 
-    - name: Build Debug (.NET 4.0)
+    - name: Build Debug (.NET 4.0 / XP)
       run: |
         if (Test-Path 'work\csharp_agent\bin') {
           Remove-Item -Recurse -Force 'work\csharp_agent\bin' -ErrorAction SilentlyContinue
         }
-        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Debug /p:Platform=AnyCPU /v:minimal
+        # runner 通常只装了 4.8 引用集，缺少 net4.0 的；用 4.8 引用集兜底
+        # （4.8 是 4.0 超集，本代码未用 4.8 专属 API，产出的 4.0 程序集仍可在 XP 运行）
+        $refDir = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8"
+        if (!(Test-Path $refDir)) {
+          $refDir = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Reference Assemblies\Microsoft\Framework\.NETFramework\v4.0"
+        }
+        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Debug /p:Platform=AnyCPU /p:FrameworkPathOverride="$refDir" /v:minimal
 
-    - name: Build Release (.NET 4.0)
+    - name: Build Release (.NET 4.0 / XP)
       run: |
-        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Release /p:Platform=AnyCPU /v:minimal
+        $refDir = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8"
+        if (!(Test-Path $refDir)) {
+          $refDir = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Reference Assemblies\Microsoft\Framework\.NETFramework\v4.0"
+        }
+        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Release /p:Platform=AnyCPU /p:FrameworkPathOverride="$refDir" /v:minimal
 
     - name: Verify builds
       run: |
