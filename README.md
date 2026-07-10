@@ -57,7 +57,7 @@ OPC_DA_Agent/
 ```batch
 # 编译
 cd csharp_agent
-build.bat
+msbuild OPC_DA_Agent.csproj /p:Configuration=Release
 
 # 运行
 cd bin\Release
@@ -85,10 +85,10 @@ cd go_collector
 ## 📖 详细文档
 
 ### Go 采集器
-参见 [go_collector/README.md](go_collector/README.md)
+参见 [docs/COLLECTOR_CONFIG.md](docs/COLLECTOR_CONFIG.md)
 
 ### C# 代理
-参见 [csharp_agent/README.md](csharp_agent/README.md)
+参见 [docs/BROWSE_API.md](docs/BROWSE_API.md)
 
 ### 开发者文档
 - [AGENTS.md](AGENTS.md) - AI 开发指南
@@ -123,7 +123,7 @@ go build -o collector collector_main.go ConfigManager.go collector_web.go KeyTra
 ### 测试 Go 采集器
 ```bash
 cd go_collector
-./final-v2.exe --config collector.ini --web-port 9090
+./collector --config collector.ini --web-port 9090
 ```
 
 ### 测试 C# 代理

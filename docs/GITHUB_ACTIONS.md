@@ -20,9 +20,7 @@
 
 | 产物名称 | 说明 | 保留天数 |
 |----------|------|---------|
-| `OPC_DA_Agent_Debug` | Debug 版本可执行文件 | 30 天 |
-| `OPC_DA_Agent_Release` | Release 版本可执行文件 | 90 天 |
-| `OPC_DA_Agent_Windows` | Release 版本 ZIP 压缩包 | 90 天 |
+| `OPC_DA_Agent_NET40` | Debug + Release 两个版本的可执行文件及其依赖（整个 `bin/` 目录） | 90 天 |
 
 ## 如何使用
 
@@ -40,7 +38,7 @@ git push origin main
 
 1. 进入 GitHub 仓库页面
 2. 点击 **Actions** 标签
-3. 选择 **Build C# OPC DA Agent** 工作流
+3. 选择 **Build C# OPC DA Agent (.NET 4.0 XP Compatible) - Fixed** 工作流
 4. 点击 **Run workflow** 按钮
 5. 选择分支（main 或 develop）
 6. 点击 **Run workflow** 按钮
@@ -75,19 +73,19 @@ gh run download -n OPC_DA_Agent_Release
 
 ### Build C# OPC DA Agent
 
-**文件**: `.github/workflows/build-csharp.yml`
+**文件**: `.github/workflows/build-csharp-net40-fixed.yml`
 
 **主要步骤**:
 
 1. **Checkout code** - 检出代码
-2. **Setup MSBuild path** - 设置 MSBuild 路径
-3. **Restore NuGet packages** - 恢复 NuGet 包
-4. **Build Debug** - 编译 Debug 版本
-5. **Build Release** - 编译 Release 版本
-6. **Upload Debug artifacts** - 上传 Debug 版本
-7. **Upload Release artifacts** - 上传 Release 版本
-8. **Create Release Archive** - 创建 ZIP 压缩包
-9. **Upload Release Archive** - 上传 ZIP 压缩包
+2. **Setup MSBuild** - 设置 MSBuild 16.0 路径
+3. **Create working copy** - 拷贝 `csharp_agent/` 到 `work/` 作为构建工作目录
+4. **Download NuGet CLI** - 下载 `nuget.exe`
+5. **Restore NuGet packages** - 恢复 `Newtonsoft.Json` 等到 `work/csharp_agent/packages/`
+6. **Build Debug** - 以 .NET 4.0（XP 兼容）编译 Debug 版本（用 4.8 引用集兜底 `FrameworkPathOverride`）
+7. **Build Release** - 编译 Release 版本
+8. **Verify builds** - 校验 `bin/Debug` 与 `bin/Release` 的 exe 是否生成
+9. **Upload artifacts** - 上传 `OPC_DA_Agent_NET40`（含 Debug + Release）
 
 ## 输出文件结构
 
@@ -152,7 +150,7 @@ OPC_DA_Agent.exe --config config.json
 
 ## 环境要求
 
-- **Runner**: Windows-latest
+- **Runner**: windows-2019
 - **.NET Framework**: 4.8（Windows 自带）
 - **MSBuild**: Visual Studio 自带
 - **NuGet**: Actions 环境自带
@@ -202,11 +200,11 @@ OPC_DA_Agent.exe --config config.json
 编辑 `.github/workflows/build-csharp.yml`：
 
 ```yaml
-- name: Upload Release artifacts
+- name: Upload artifacts
   uses: actions/upload-artifact@v4
   with:
-    name: OPC_DA_Agent_Release
-    path: csharp_agent/bin/Release/
+    name: OPC_DA_Agent_NET40
+    path: work\csharp_agent\bin/
     retention-days: 180  # 修改为 180 天
 ```
 
