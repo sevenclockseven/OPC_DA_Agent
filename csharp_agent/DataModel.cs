@@ -319,7 +319,6 @@ public class OPCNodeDetail
 
     [JsonProperty("item_id")]
     public string ItemId { get; set; }
-}
 
     /// <summary>
     /// 系统状态 DTO（/api/status 返回）。
