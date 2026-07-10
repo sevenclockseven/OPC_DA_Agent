@@ -1,33 +1,32 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 using OpcNetApi;
-using OpcNetApi.Com;
 
 namespace OPC_DA_Agent
 {
-    /// <summary>
-    /// OPC DA 数据采集服务
-    /// 使用 OPC .NET API 的 Mock 实现
-    /// </summary>
     public class OPCService : IDisposable
     {
         private Server _opcServer;
         private Group _opcGroup;
-        private List<TagConfig> _tags;
-        private Dictionary<string, object> _lastValues;
+        private List<TagConfig> _tags = new List<TagConfig>();
+        private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
         private bool _isRunning;
         private object _lock = new object();
 
-        // 统计信息
         private long _totalReads = 0;
         private long _totalErrors = 0;
         private DateTime _startTime;
 
         private readonly Logger _logger;
         private readonly Config _config;
+        private readonly string _configPath;
+
+        /// <summary>配置文件路径，用于保存标签配置</summary>
+        public string ConfigPath { get { return _configPath; } }
 
         public bool IsConnected
         {
@@ -39,48 +38,34 @@ namespace OPC_DA_Agent
             get { return _tags != null ? _tags.Count : 0; }
         }
 
-        public long TotalReads
-        {
-            get { return _totalReads; }
-        }
+        public long TotalReads { get { return _totalReads; } }
+        public long TotalErrors { get { return _totalErrors; } }
+        public DateTime StartTime { get { return _startTime; } }
 
-        public long TotalErrors
-        {
-            get { return _totalErrors; }
-        }
-
-        public DateTime StartTime
-        {
-            get { return _startTime; }
-        }
-
-        public OPCService(Config config, Logger logger)
+        public OPCService(Config config, Logger logger, string configPath = null)
         {
             if (config == null) throw new ArgumentNullException("config");
             if (logger == null) throw new ArgumentNullException("logger");
 
             _config = config;
             _logger = logger;
-            _tags = new List<TagConfig>();
-            _lastValues = new Dictionary<string, object>();
+            _configPath = configPath ?? "config.json";
             _startTime = DateTime.Now;
         }
 
         /// <summary>
-        /// 连接到OPC DA服务器
+        /// 连接到 OPC DA 服务器
         /// </summary>
         public bool Connect()
         {
             try
             {
-                _logger.Info("正在连接到OPC服务器...");
-                
-                // Mock实现 - 使用模拟OPC服务器
-                string serverName = ExtractServerName(_config.OpcServerUrl);
-                _opcServer = new Server(serverName);
+                _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
+
+                _opcServer = new Server(_config.OpcServerProgId);
                 _opcServer.Connect();
 
-                _logger.Info(string.Format("已连接到OPC服务器: {0}", serverName));
+                _logger.Info("已连接到OPC服务器");
                 return true;
             }
             catch (Exception ex)
@@ -91,7 +76,7 @@ namespace OPC_DA_Agent
         }
 
         /// <summary>
-        /// 启动数据采集
+        /// 启动数据采集（使用配置中的标签列表）
         /// </summary>
         public bool Start()
         {
@@ -103,13 +88,14 @@ namespace OPC_DA_Agent
 
             try
             {
-                // 创建OPC组
-                _opcGroup = _opcServer.CreateGroup("DataGroup", true, 1000, null, null, null, null);
+                int updateRate = _config.UpdateInterval;
+                _opcGroup = _opcServer.CreateGroup("DataGroup", true, updateRate, null, null, null, null);
 
-                // 创建示例OPC标签
-                CreateSampleTags();
+                if (_tags.Count > 0)
+                {
+                    ApplyTags();
+                }
 
-                // 启动定时更新
                 _updateTimer = new Timer(OnUpdateTimer, null, 0, _config.UpdateInterval);
                 _isRunning = true;
 
@@ -120,6 +106,44 @@ namespace OPC_DA_Agent
             {
                 _logger.Error("启动数据采集失败", ex);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// 应用标签配置：将 _tags 中的标签添加到 OPC Group
+        /// </summary>
+        private void ApplyTags()
+        {
+            try
+            {
+                if (_opcGroup == null) return;
+
+                var itemIds = new List<string>();
+                foreach (var tag in _tags)
+                {
+                    if (tag.Enabled || tag.Active)
+                    {
+                        itemIds.Add(tag.NodeId);
+                    }
+                }
+
+                if (itemIds.Count > 0)
+                {
+                    var added = _opcGroup.AddItems(itemIds.ToArray());
+                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", added.Length, itemIds.Count));
+
+                    lock (_lock)
+                    {
+                        foreach (string id in added)
+                        {
+                            _lastValues[id] = null;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("添加OPC标签失败", ex);
             }
         }
 
@@ -146,7 +170,14 @@ namespace OPC_DA_Agent
 
             try
             {
-                UpdateSampleData();
+                var values = _opcGroup.SyncReadAll();
+                lock (_lock)
+                {
+                    foreach (var kvp in values)
+                    {
+                        _lastValues[kvp.Key] = kvp.Value;
+                    }
+                }
                 _totalReads++;
             }
             catch (Exception ex)
@@ -154,56 +185,6 @@ namespace OPC_DA_Agent
                 _totalErrors++;
                 _logger.Error("更新数据时发生错误", ex);
             }
-        }
-
-        /// <summary>
-        /// 创建示例OPC标签
-        /// </summary>
-        private void CreateSampleTags()
-        {
-            // 创建一些示例标签用于测试
-            var sampleTags = new string[] { 
-                "Channel1.Device1.Temperature", 
-                "Channel1.Device1.Pressure",
-                "Channel1.Device1.Flow"
-            };
-
-            foreach (string tagName in sampleTags)
-            {
-                var tagConfig = new TagConfig
-                {
-                    NodeId = tagName,
-                    Name = tagName,
-                    Active = true
-                };
-                _tags.Add(tagConfig);
-                _lastValues[tagName] = GetRandomValue();
-            }
-
-            _logger.Info(string.Format("已创建 {0} 个OPC标签", _tags.Count));
-        }
-
-        /// <summary>
-        /// 更新示例数据
-        /// </summary>
-        private void UpdateSampleData()
-        {
-            lock (_lock)
-            {
-                foreach (string key in _lastValues.Keys)
-                {
-                    _lastValues[key] = GetRandomValue();
-                }
-            }
-        }
-
-        /// <summary>
-        /// 生成随机值
-        /// </summary>
-        private object GetRandomValue()
-        {
-            var random = new Random();
-            return random.NextDouble() * 100;
         }
 
         /// <summary>
@@ -223,7 +204,7 @@ namespace OPC_DA_Agent
         }
 
         /// <summary>
-        /// 获取当前数据
+        /// 获取当前采集数据
         /// </summary>
         public object GetData()
         {
@@ -232,47 +213,190 @@ namespace OPC_DA_Agent
             {
                 foreach (var kvp in _lastValues)
                 {
-                    if (kvp.Value != null)
-                    {
-                        result[kvp.Key] = kvp.Value;
-                    }
+                    result[kvp.Key] = kvp.Value;
                 }
             }
             return result;
         }
 
         /// <summary>
-        /// 获取浏览根节点
+        /// 浏览 OPC 服务器根节点
         /// </summary>
-        public object GetBrowseRoot()
+        public List<OPCNode> GetBrowseRoot()
         {
-            return new[]
-            {
-                new { nodeId = "Root", name = "根节点", hasChildren = true }
-            };
+            return BrowsePath(null);
         }
 
         /// <summary>
-        /// 提取服务器名称
+        /// 浏览指定路径下的子节点
         /// </summary>
-        private string ExtractServerName(string opcServerUrl)
+        /// <param name="nodeId">节点路径（null 或空字符串表示根节点）</param>
+        public List<OPCNode> BrowsePath(string nodeId)
         {
-            // 从 OPC DA URL 中提取服务器名称
-            // 例如: opcda://localhost/OPCServer.WinCC -> OPCServer.WinCC
-            int lastSlash = opcServerUrl.LastIndexOf('/');
-            if (lastSlash >= 0 && lastSlash < opcServerUrl.Length - 1)
+            if (_opcServer == null || !_opcServer.IsConnected)
+                throw new InvalidOperationException("未连接到OPC服务器");
+
+            var result = new List<OPCNode>();
+            try
             {
-                return opcServerUrl.Substring(lastSlash + 1);
+                var browser = (IOPCBrowseServerAddressSpace)_opcServer.ComObject;
+
+                OPCNAMESPACETYPE nsType;
+                browser.QueryOrganization(out nsType);
+
+                string currentPos;
+                if (string.IsNullOrEmpty(nodeId) || nodeId == "Root")
+                {
+                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
+                    currentPos = "";
+                }
+                else
+                {
+                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, nodeId);
+                    currentPos = nodeId;
+                }
+
+                // 浏览分支（文件夹）
+                var branches = BrowseItems(browser, OPCBROWSETYPE.OPC_BRANCH);
+                foreach (string name in branches)
+                {
+                    string itemId = name;
+                    try
+                    {
+                        string fullId;
+                        browser.GetItemID(name, out fullId);
+                        itemId = fullId ?? name;
+                    }
+                    catch { }
+
+                    result.Add(new OPCNode
+                    {
+                        NodeId = itemId,
+                        Name = name,
+                        Description = "分支",
+                        IsFolder = true,
+                        HasChildren = true,
+                        Children = new List<OPCNode>()
+                    });
+                }
+
+                // 浏览叶子（标签）
+                var leaves = BrowseItems(browser, OPCBROWSETYPE.OPC_LEAF);
+                foreach (string name in leaves)
+                {
+                    string itemId = name;
+                    try
+                    {
+                        string fullId;
+                        browser.GetItemID(name, out fullId);
+                        itemId = fullId ?? name;
+                    }
+                    catch { }
+
+                    result.Add(new OPCNode
+                    {
+                        NodeId = itemId,
+                        Name = name,
+                        Description = "标签",
+                        IsFolder = false,
+                        HasChildren = false,
+                        Children = null
+                    });
+                }
             }
-            return "MockServer";
+            catch (Exception ex)
+            {
+                _logger.Error(string.Format("浏览节点失败: {0}", nodeId ?? "(root)"), ex);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 调用 BrowseOPCItemIDs 并枚举返回的字符串
+        /// </summary>
+        private List<string> BrowseItems(IOPCBrowseServerAddressSpace browser, OPCBROWSETYPE browseType)
+        {
+            var result = new List<string>();
+
+            OpcNetApi.Com.IEnumString enumString;
+            browser.BrowseOPCItemIDs(
+                browseType,
+                "",      // 无过滤条件
+                0,       // 不限数据类型
+                0,       // 不限访问权限
+                out enumString);
+
+            if (enumString == null) return result;
+
+            const int batchSize = 100;
+            string[] buffer = new string[batchSize];
+            int fetched;
+
+            do
+            {
+                enumString.Next(batchSize, buffer, out fetched);
+                for (int i = 0; i < fetched; i++)
+                {
+                    result.Add(buffer[i]);
+                }
+            } while (fetched == batchSize);
+
+            return result;
+        }
+
+        /// <summary>
+        /// 更新标签列表（来自 Web UI 选择）
+        /// </summary>
+        public void UpdateTags(List<TagConfig> newTags)
+        {
+            lock (_lock)
+            {
+                if (_opcGroup != null)
+                {
+                    _opcGroup.RemoveAllItems();
+                }
+
+                _tags = newTags;
+                _lastValues.Clear();
+
+                if (_opcGroup != null && _tags.Count > 0)
+                {
+                    ApplyTags();
+                }
+            }
+
+            _config.Tags = newTags;
+            try
+            {
+                _config.SaveToFile(_configPath);
+                _logger.Info(string.Format("标签配置已保存到 {0}（{1}个标签）", _configPath, newTags.Count));
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("保存标签配置失败", ex);
+            }
+        }
+
+        /// <summary>
+        /// 获取当前标签列表
+        /// </summary>
+        public List<TagConfig> GetTags()
+        {
+            return _tags;
         }
 
         public void Dispose()
         {
             Stop();
+            if (_opcGroup != null)
+            {
+                _opcGroup.Dispose();
+                _opcGroup = null;
+            }
             if (_opcServer != null)
             {
-                _opcServer.Disconnect();
+                _opcServer.Dispose();
                 _opcServer = null;
             }
         }

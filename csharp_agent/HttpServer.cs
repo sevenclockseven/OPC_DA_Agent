@@ -9,9 +9,6 @@ using Newtonsoft.Json;
 
 namespace OPC_DA_Agent
 {
-    /// <summary>
-    /// HTTP REST API服务器
-    /// </summary>
     public class HttpServer : IDisposable
     {
         private readonly HttpListener _listener;
@@ -34,13 +31,12 @@ namespace OPC_DA_Agent
             _logger = logger;
 
             _listener = new HttpListener();
-            _listener.Prefixes.Add(string.Format("http://localhost:{0}/", _config.HttpPort));
+            string bind = string.IsNullOrEmpty(config.HttpBindIp) ? "localhost" : config.HttpBindIp;
+            if (bind == "0.0.0.0") bind = "+";
+            _listener.Prefixes.Add(string.Format("http://{0}:{1}/", bind, config.HttpPort));
             _cts = new CancellationTokenSource();
         }
 
-        /// <summary>
-        /// 启动HTTP服务器
-        /// </summary>
         public bool Start()
         {
             if (_isRunning)
@@ -54,34 +50,41 @@ namespace OPC_DA_Agent
                 _listener.Start();
                 _isRunning = true;
                 _logger.Info(string.Format("HTTP服务器已启动，监听端口: {0}", _config.HttpPort));
-
-                // 启动异步监听
                 _listener.BeginGetContext(OnGetContext, null);
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.Error("HTTP服务器启动失败", ex);
-                return false;
+                _logger.Info("尝试使用 localhost 绑定...");
+                try
+                {
+                    _listener.Stop();
+                    _listener.Prefixes.Clear();
+                    _listener.Prefixes.Add(string.Format("http://localhost:{0}/", _config.HttpPort));
+                    _listener.Start();
+                    _isRunning = true;
+                    _logger.Info(string.Format("HTTP服务器已启动（localhost），端口: {0}", _config.HttpPort));
+                    _listener.BeginGetContext(OnGetContext, null);
+                    return true;
+                }
+                catch (Exception ex2)
+                {
+                    _logger.Error("HTTP服务器启动失败（localhost回退）", ex2);
+                    return false;
+                }
             }
         }
 
-        /// <summary>
-        /// 停止HTTP服务器
-        /// </summary>
         public void Stop()
         {
             if (!_isRunning) return;
-
             _isRunning = false;
             _cts.Cancel();
             _listener.Stop();
             _logger.Info("HTTP服务器已停止");
         }
 
-        /// <summary>
-        /// 处理HTTP请求
-        /// </summary>
         private void OnGetContext(IAsyncResult result)
         {
             if (!_isRunning) return;
@@ -91,39 +94,23 @@ namespace OPC_DA_Agent
             {
                 context = _listener.EndGetContext(result);
                 _requestCount++;
-
-                // 同步处理请求
                 ProcessRequest(context);
             }
-            catch (ObjectDisposedException)
-            {
-                // 监听器已停止
-                return;
-            }
+            catch (ObjectDisposedException) { return; }
             catch (Exception ex)
             {
                 _logger.Error("处理HTTP请求时发生错误", ex);
             }
             finally
             {
-                // 继续监听下一个请求
                 if (_isRunning && _listener.IsListening)
                 {
-                    try
-                    {
-                        _listener.BeginGetContext(OnGetContext, null);
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // 监听器已停止
-                    }
+                    try { _listener.BeginGetContext(OnGetContext, null); }
+                    catch (ObjectDisposedException) { }
                 }
             }
         }
 
-        /// <summary>
-        /// 处理具体的HTTP请求
-        /// </summary>
         private void ProcessRequest(HttpListenerContext context)
         {
             HttpListenerRequest request = context.Request;
@@ -141,36 +128,53 @@ namespace OPC_DA_Agent
                 return;
             }
 
-            ApiResponse apiResponse = null;
-
             try
             {
                 string path = request.Url.AbsolutePath.ToLower();
                 string method = request.HttpMethod;
+                string query = request.Url.Query;
 
-                // 路由处理
+                byte[] buffer = null;
+
+                // === API 路由 ===
                 if (path == "/api/status" && method == "GET")
                 {
-                    apiResponse = GetStatus();
+                    buffer = Json(ApiResponse.SuccessResponse(_opcService.GetStatus()));
                 }
                 else if (path == "/api/data" && method == "GET")
                 {
-                    apiResponse = GetData();
+                    buffer = Json(ApiResponse.SuccessResponse(_opcService.GetData()));
+                }
+                else if (path == "/api/tags" && method == "GET")
+                {
+                    buffer = Json(ApiResponse.SuccessResponse(_opcService.GetTags()));
+                }
+                else if (path == "/api/tags" && method == "POST")
+                {
+                    buffer = HandleSaveTags(request);
                 }
                 else if (path == "/api/browse" && method == "GET")
                 {
-                    apiResponse = GetBrowseRoot();
+                    buffer = Json(ApiResponse.SuccessResponse(_opcService.GetBrowseRoot()));
+                }
+                else if (path == "/api/browse/node" && method == "GET")
+                {
+                    string nodeId = ExtractQuery(query, "nodeId");
+                    buffer = Json(ApiResponse.SuccessResponse(_opcService.BrowsePath(nodeId)));
+                }
+                // === Web UI ===
+                else if ((path == "/" || path == "/index.html") && method == "GET")
+                {
+                    buffer = Html(GetWebUI());
                 }
                 else
                 {
-                    apiResponse = ApiResponse.ErrorResponse("未找到的接口");
+                    buffer = Json(ApiResponse.ErrorResponse("未找到的接口: " + path));
                     response.StatusCode = 404;
                 }
 
-                if (apiResponse != null)
+                if (buffer != null)
                 {
-                    string json = JsonConvert.SerializeObject(apiResponse);
-                    byte[] buffer = Encoding.UTF8.GetBytes(json);
                     response.ContentLength64 = buffer.Length;
                     response.OutputStream.Write(buffer, 0, buffer.Length);
                 }
@@ -179,10 +183,9 @@ namespace OPC_DA_Agent
             {
                 _logger.Error("处理HTTP请求时发生错误", ex);
                 response.StatusCode = 500;
-                string errorJson = JsonConvert.SerializeObject(ApiResponse.ErrorResponse("内部服务器错误"));
-                byte[] errorBuffer = Encoding.UTF8.GetBytes(errorJson);
-                response.ContentLength64 = errorBuffer.Length;
-                response.OutputStream.Write(errorBuffer, 0, errorBuffer.Length);
+                byte[] errorBuf = Json(ApiResponse.ErrorResponse("内部服务器错误: " + ex.Message));
+                response.ContentLength64 = errorBuf.Length;
+                response.OutputStream.Write(errorBuf, 0, errorBuf.Length);
             }
             finally
             {
@@ -190,36 +193,248 @@ namespace OPC_DA_Agent
             }
         }
 
-        /// <summary>
-        /// 获取系统状态
-        /// </summary>
-        private ApiResponse GetStatus()
+        private byte[] HandleSaveTags(HttpListenerRequest request)
         {
-            var status = _opcService.GetStatus();
-            return ApiResponse.SuccessResponse(status);
+            try
+            {
+                using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                {
+                    string body = reader.ReadToEnd();
+                    var tagReq = JsonConvert.DeserializeObject<SaveTagsRequest>(body);
+                    if (tagReq != null && tagReq.Tags != null)
+                    {
+                        _opcService.UpdateTags(tagReq.Tags);
+                        return Json(ApiResponse.SuccessResponse(null, string.Format("已保存{0}个标签", tagReq.Tags.Count)));
+                    }
+                    return Json(ApiResponse.ErrorResponse("请求数据无效"));
+                }
+            }
+            catch (Exception ex)
+            {
+                return Json(ApiResponse.ErrorResponse("保存标签失败: " + ex.Message));
+            }
         }
 
-        /// <summary>
-        /// 获取数据
-        /// </summary>
-        private ApiResponse GetData()
+        private string ExtractQuery(string query, string key)
         {
-            var data = _opcService.GetData();
-            return ApiResponse.SuccessResponse(data);
+            if (string.IsNullOrEmpty(query)) return null;
+            query = query.TrimStart('?');
+            foreach (string pair in query.Split('&'))
+            {
+                var kv = pair.Split(new[] { '=' }, 2);
+                if (kv.Length == 2 && kv[0] == key)
+                    return Uri.UnescapeDataString(kv[1]);
+            }
+            return null;
         }
 
-        /// <summary>
-        /// 浏览根节点
-        /// </summary>
-        private ApiResponse GetBrowseRoot()
+        private byte[] Json(ApiResponse apiResponse)
         {
-            var rootNodes = _opcService.GetBrowseRoot();
-            return ApiResponse.SuccessResponse(rootNodes);
+            string json = JsonConvert.SerializeObject(apiResponse);
+            return Encoding.UTF8.GetBytes(json);
         }
 
-        public void Dispose()
+        private byte[] Html(string html)
         {
-            Stop();
+            return Encoding.UTF8.GetBytes(html);
         }
+
+        /// <summary>返回单页 Web UI（浏览+选择标签）</summary>
+        private string GetWebUI()
+        {
+            return @"<!DOCTYPE html>
+<html lang=""zh-CN"">
+<head>
+<meta charset=""UTF-8"">
+<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+<title>OPC DA 数据采集代理 - 标签配置</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:""Microsoft YaHei"",""Segoe UI"",sans-serif;background:#1e1e2e;color:#cdd6f4}
+.container{display:flex;height:100vh}
+.left{width:55%;border-right:1px solid #45475a;overflow:auto;padding:16px}
+.right{width:45%;padding:16px;overflow:auto}
+h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
+.node{cursor:pointer;padding:4px 8px;border-radius:6px;margin:2px 0;font-size:14px}
+.node:hover{background:#313244}
+.node.branch{color:#89b4fa}
+.node.leaf{color:#a6e3a1}
+.node.selected{background:#45475a}
+.children{margin-left:20px;display:none}
+.children.open{display:block}
+.btn{padding:8px 20px;border:none;border-radius:8px;background:#cba6f7;color:#1e1e2e;font-weight:bold;cursor:pointer;margin:8px 0}
+.btn:hover{background:#b4befe}
+.tag-list{list-style:none;margin:8px 0}
+.tag-item{padding:6px 12px;background:#313244;border-radius:6px;margin:4px 0;display:flex;justify-content:space-between;align-items:center}
+.tag-remove{color:#f38ba8;cursor:pointer;font-weight:bold}
+.status-bar{position:fixed;bottom:0;left:0;right:0;background:#181825;padding:8px 16px;font-size:12px;color:#6c7086}
+.connected{color:#a6e3a1}.disconnected{color:#f38ba8}
+</style>
+</head>
+<body>
+<div class=""container"">
+  <div class=""left"">
+    <h2>OPC 节点浏览</h2>
+    <button class=""btn"" onclick=""loadRoot()"" id=""btnBrowse"">浏览根节点</button>
+    <div id=""tree""></div>
+  </div>
+  <div class=""right"">
+    <h2>已选标签</h2>
+    <button class=""btn"" onclick=""saveTags()"">保存并应用</button>
+    <ul class=""tag-list"" id=""tagList""></ul>
+  </div>
+</div>
+<div class=""status-bar"" id=""statusBar"">连接中...</div>
+<script>
+var selected = {};
+var port = location.port || 8080;
+var base = '' + location.protocol + '//' + location.hostname + ':' + port;
+
+function api(path, method, data, cb) {
+  var x = new XMLHttpRequest();
+  x.open(method || 'GET', base + path);
+  x.setRequestHeader('Content-Type', 'application/json');
+  x.onload = function() {
+    try { cb(JSON.parse(x.responseText)); } catch(e) { cb({success:false,message:e.message}); }
+  };
+  x.send(data ? JSON.stringify(data) : null);
+}
+
+function loadRoot() {
+  document.getElementById('tree').innerHTML = '<p>加载中...</p>';
+  api('/api/browse', 'GET', null, function(r) {
+    if (r.success) renderTree('tree', r.data);
+    else document.getElementById('tree').innerHTML = '<p style=color:#f38ba8>错误: ' + r.message + '</p>';
+  });
+}
+
+function renderTree(parentId, nodes) {
+  var parent = document.getElementById(parentId);
+  parent.innerHTML = '';
+  if (!nodes || nodes.length === 0) {
+    parent.innerHTML = '<p style=color:#6c7086>（无子节点）</p>';
+    return;
+  }
+  nodes.forEach(function(n) {
+    var div = document.createElement('div');
+    var nodeDiv = document.createElement('div');
+    nodeDiv.className = 'node ' + (n.isFolder ? 'branch' : 'leaf');
+    nodeDiv.textContent = (n.isFolder ? '📁 ' : '🏷 ') + n.name;
+    nodeDiv.onclick = function() {
+      if (n.isFolder) {
+        var childrenDiv = document.getElementById('children-' + parentId + '-' + n.nodeId);
+        if (childrenDiv) {
+          if (childrenDiv.classList.contains('open')) {
+            childrenDiv.classList.remove('open');
+          } else {
+            if (!childrenDiv.dataset.loaded) {
+              loadChildren('children-' + parentId + '-' + n.nodeId, n.nodeId);
+            }
+            childrenDiv.classList.add('open');
+          }
+        }
+      } else {
+        toggleTag(n);
+        nodeDiv.classList.toggle('selected');
+      }
+    };
+    div.appendChild(nodeDiv);
+
+    if (n.isFolder) {
+      var childrenDiv = document.createElement('div');
+      childrenDiv.id = 'children-' + parentId + '-' + n.nodeId;
+      childrenDiv.className = 'children';
+      div.appendChild(childrenDiv);
+    }
+    parent.appendChild(div);
+  });
+}
+
+function loadChildren(containerId, nodeId) {
+  var container = document.getElementById(containerId);
+  container.innerHTML = '<p style=color:#6c7086>加载中...</p>';
+  var url = '/api/browse/node?nodeId=' + encodeURIComponent(nodeId);
+  api(url, 'GET', null, function(r) {
+    if (r.success) {
+      renderTree(containerId, r.data);
+      container.dataset.loaded = '1';
+    } else {
+      container.innerHTML = '<p style=color:#f38ba8>' + r.message + '</p>';
+    }
+  });
+}
+
+function toggleTag(node) {
+  if (selected[node.nodeId]) {
+    delete selected[node.nodeId];
+  } else {
+    selected[node.nodeId] = { node_id: node.nodeId, name: node.name, description: '', data_type: '', enabled: true, active: true };
+  }
+  renderTagList();
+}
+
+function renderTagList() {
+  var ul = document.getElementById('tagList');
+  ul.innerHTML = '';
+  var keys = Object.keys(selected);
+  if (keys.length === 0) {
+    ul.innerHTML = '<p style=color:#6c7086>未选择任何标签</p>';
+    return;
+  }
+  keys.forEach(function(id) {
+    var t = selected[id];
+    var li = document.createElement('li');
+    li.className = 'tag-item';
+    li.innerHTML = '<span>' + t.name + '</span><span class=""tag-remove"" onclick=""removeTag(\\''+ id + '\\')"">✕</span>';
+    ul.appendChild(li);
+  });
+}
+
+function removeTag(id) {
+  delete selected[id];
+  renderTagList();
+}
+
+function saveTags() {
+  var keys = Object.keys(selected);
+  if (keys.length === 0) {
+    alert('请先选择标签');
+    return;
+  }
+  var tags = keys.map(function(id) {
+    return selected[id];
+  });
+  api('/api/tags', 'POST', { tags: tags }, function(r) {
+    if (r.success) alert(r.message || '保存成功');
+    else alert('保存失败: ' + r.message);
+  });
+}
+
+function loadStatus() {
+  api('/api/status', 'GET', null, function(r) {
+    if (r.success && r.data) {
+      var s = r.data;
+      var cls = s.isConnected ? 'connected' : 'disconnected';
+      var text = s.isConnected ? '已连接' : '未连接';
+      document.getElementById('statusBar').innerHTML = '<span class=""' + cls + '"">● ' + text + '</span> | 标签: ' + s.tagCount + ' | 读取: ' + s.totalReads + ' | 错误: ' + s.totalErrors + ' | 运行: ' + Math.floor(s.uptimeSeconds) + '秒';
+    }
+  });
+}
+
+loadRoot();
+loadStatus();
+setInterval(loadStatus, 3000);
+</script>
+</body>
+</html>";
+        }
+
+        public void Dispose() { Stop(); }
+    }
+
+    public class SaveTagsRequest
+    {
+        [JsonProperty("tags")]
+        public List<TagConfig> Tags { get; set; }
     }
 }
