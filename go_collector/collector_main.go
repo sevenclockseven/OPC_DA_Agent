@@ -196,6 +196,8 @@ func (c *Collector) collectLoop() {
 }
 
 func (c *Collector) collectData() {
+	c.transformer.LoadFromFile("transform.json")
+
 	var rawData []map[string]interface{}
 
 	if c.httpClient != nil && c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
