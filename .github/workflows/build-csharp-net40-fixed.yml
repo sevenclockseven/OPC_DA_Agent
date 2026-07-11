@@ -21,6 +21,33 @@ jobs:
       with:
         msbuild-version: '16.0'
 
+    - name: Register OPC Automation
+      run: |
+        $dllPath = "work\csharp_agent\OPCDAAuto.dll"
+        if (Test-Path $dllPath) {
+          Write-Host "Registering OPCDAAuto.dll..."
+          # 查找 regtlib
+          $frameworks = @(
+            "C:\Windows\Microsoft.NET\Framework64\v4.0.30319",
+            "C:\Windows\Microsoft.NET\Framework\v4.0.30319"
+          )
+          foreach ($fw in $frameworks) {
+            $regtlib = Join-Path $fw "regtlib.exe"
+            if (Test-Path $regtlib) {
+              Write-Host "Using $regtlib"
+              & $regtlib "$dllPath"
+              break
+            }
+          }
+          # 验证
+          $clsid = '{28E68F9A-8D75-11D1-8DC3-3C302A000000}'
+          if (Test-Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid") {
+            Write-Host "OPC Automation registered successfully"
+          } else {
+            Write-Host "CLSID not found after registration"
+          }
+        }
+
     - name: Create working copy
       run: |
         # 创建工作目录
