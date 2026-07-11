@@ -33,6 +33,8 @@ type MqttConfig struct {
 
 type RtdbConfig struct {
 	Enabled bool   `json:"enabled" ini:"enabled"`
+	Host    string `json:"host" ini:"host"`
+	Port    int    `json:"port" ini:"port"`
 	Format  string `json:"format" ini:"format"`
 }
 
