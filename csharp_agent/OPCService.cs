@@ -203,8 +203,8 @@ namespace OPC_DA_Agent
                         try
                         {
                             object value;
-                            int quality;
-                            DateTime timestamp;
+                            object quality;
+                            object timestamp;
                             _opcGroup.OPCItems.Item(i + 1).Read(2, out value, out quality, out timestamp);
                             _lastValues[enabledTags[i].NodeId] = value;
                         }
