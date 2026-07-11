@@ -37,12 +37,11 @@ func (ws *WebServer) Start(port int) error {
 
 	// Web页面
 	r.HandleFunc("/", ws.handleHome).Methods("GET")
-	r.HandleFunc("/web/config", ws.handleConfigPage).Methods("GET")
+	r.HandleFunc("/web/monitor", ws.handleMonitorPage).Methods("GET")
 	r.HandleFunc("/web/http", ws.handleHttpPage).Methods("GET")
 	r.HandleFunc("/web/mqtt", ws.handleMqttPage).Methods("GET")
 	r.HandleFunc("/web/rtdb", ws.handleRtdbPage).Methods("GET")
 	r.HandleFunc("/web/transform", ws.handleTransformPage).Methods("GET")
-	r.HandleFunc("/web/webhook", ws.handleWebhookPage).Methods("GET")
 
 	// API接口
 	r.HandleFunc("/api/config", ws.handleGetConfig).Methods("GET")
@@ -89,9 +88,9 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
         <p>欢迎使用OPC DA采集程序Web配置界面</p>
 
         <div class="menu">
-            <a href="/web/config" class="menu-item">
-                <h3>⚙️ 配置管理</h3>
-                <p>查看和编辑主配置</p>
+            <a href="/web/http" class="menu-item">
+                <h3>🌐 数据源</h3>
+                <p>配置HTTP数据源</p>
             </a>
             <a href="/web/mqtt" class="menu-item">
                 <h3>📡 MQTT输出</h3>
@@ -105,9 +104,9 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
                 <h3>🔄 键名转换</h3>
                 <p>配置转换规则</p>
             </a>
-            <a href="/web/webhook" class="menu-item">
-                <h3>🔔 Webhook</h3>
-                <p>配置预警推送</p>
+            <a href="/web/monitor" class="menu-item">
+                <h3>🔔 监控配置</h3>
+                <p>配置Webhook预警</p>
             </a>
         </div>
 
@@ -127,183 +126,12 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
 	ws.renderHTML(w, tmpl)
 }
 
-func (ws *WebServer) handleConfigPage(w http.ResponseWriter, r *http.Request) {
+func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>配置管理 - OPC DA Collector</title>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .section { background: #f9f9f9; padding: 15px; margin: 15px 0; border-radius: 6px; border-left: 4px solid #4CAF50; }
-        .section h3 { margin-top: 0; color: #4CAF50; }
-        .back { background: #666; }
-        .test { background: #2196F3; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>⚙️ 配置管理</h1>
-        <a href="/" class="back">← 返回首页</a>
-
-        <form id="configForm">
-            <div class="section">
-                <h3>主配置</h3>
-                <div class="form-group">
-                    <label>系统标题</label>
-                    <input type="text" id="title" name="title" placeholder="例如: 辽塔172.16.32.245烧成">
-                </div>
-                <div class="form-group">
-                    <label>调试模式</label>
-                    <select id="debug" name="debug">
-                        <option value="false">关闭</option>
-                        <option value="true">开启</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>OPC服务器主机</label>
-                    <input type="text" id="opc_host" name="opc_host" placeholder="例如: 172.16.32.98">
-                </div>
-                <div class="form-group">
-                    <label>OPC服务器名称</label>
-                    <input type="text" id="opc_server" name="opc_server" placeholder="例如: KEPware.KEPServerEx.V4">
-                </div>
-            </div>
-
-            <div class="section">
-                <h3>实时数据库配置</h3>
-                <div class="form-group">
-                    <label>RTDB主机（多个用逗号分隔）</label>
-                    <input type="text" id="rtdb_host" name="rtdb_host" placeholder="例如: 172.16.32.98">
-                </div>
-                <div class="form-group">
-                    <label>RTDB端口（多个用逗号分隔）</label>
-                    <input type="text" id="rtdb_port" name="rtdb_port" placeholder="例如: 8100">
-                </div>
-            </div>
-
-            <div class="section">
-                <h3>监控配置</h3>
-                <div class="form-group">
-                    <label>监控模式</label>
-                    <select id="monitor_mode" name="monitor_mode">
-                        <option value="email">Email</option>
-                        <option value="web">Web</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>告警邮箱</label>
-                    <input type="email" id="monitor_email" name="monitor_email" placeholder="例如: 2018241195@qq.com">
-                </div>
-                <div class="form-group">
-                    <label>监控IP</label>
-                    <input type="text" id="monitor_ip" name="monitor_ip" placeholder="例如: 172.16.32.245">
-                </div>
-            </div>
-
-            <button type="button" onclick="saveConfig()">💾 保存配置</button>
-            <button type="button" class="test" onclick="validateConfig()">✅ 验证配置</button>
-            <button type="button" onclick="exportConfig('ini')">📥 导出INI</button>
-            <button type="button" onclick="exportConfig('json')">📥 导出JSON</button>
-        </form>
-
-        <div id="result" style="margin-top: 20px;"></div>
-    </div>
-
-    <script>
-        async function loadConfig() {
-            const response = await fetch('/api/config');
-            const data = await response.json();
-            if (data.success) {
-                const config = data.data;
-                document.getElementById('title').value = config.main?.title || '';
-                document.getElementById('debug').value = config.main?.debug?.toString() || 'false';
-                document.getElementById('opc_host').value = config.main?.opc_host || '';
-                document.getElementById('opc_server').value = config.main?.opc_server || '';
-                document.getElementById('rtdb_host').value = (config.main?.rtdb_host || []).join(',');
-                document.getElementById('rtdb_port').value = (config.main?.rtdb_port || []).join(',');
-                document.getElementById('monitor_mode').value = config.monitor?.mode || 'email';
-                document.getElementById('monitor_email').value = config.monitor?.email || '';
-                document.getElementById('monitor_ip').value = config.monitor?.ip || '';
-            }
-        }
-
-        async function saveConfig() {
-            const config = {
-                main: {
-                    title: document.getElementById('title').value,
-                    debug: document.getElementById('debug').value === 'true',
-                    opc_host: document.getElementById('opc_host').value,
-                    opc_server: document.getElementById('opc_server').value,
-                    rtdb_host: document.getElementById('rtdb_host').value.split(',').map(s => s.trim()).filter(s => s),
-                    rtdb_port: document.getElementById('rtdb_port').value.split(',').map(s => parseInt(s.trim())).filter(s => s)
-                },
-                monitor: {
-                    mode: document.getElementById('monitor_mode').value,
-                    email: document.getElementById('monitor_email').value,
-                    ip: document.getElementById('monitor_ip').value
-                }
-            };
-
-            const response = await fetch('/api/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config)
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        async function validateConfig() {
-            const response = await fetch('/api/config/validate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: '{}'
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        async function exportConfig(format) {
-            window.location.href = '/api/config/export?format=' + format;
-        }
-
-        function showResult(result) {
-            const div = document.getElementById('result');
-            if (result.success) {
-                div.innerHTML = '<div class="success">✓ ' + (result.message || '操作成功') + '</div>';
-            } else {
-                div.innerHTML = '<div class="error">✗ ' + (result.message || '操作失败') + '</div>';
-            }
-        }
-
-        // 页面加载时加载配置
-        loadConfig();
-    </script>
-</body>
-</html>
-	`
-	ws.renderHTML(w, tmpl)
-}
-
-func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
-	tmpl := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>MQTT配置 - OPC DA Collector</title>
+    <title>HTTP配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -315,7 +143,7 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; }
+        .back { background: #666; border: 2px solid #333; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
@@ -482,7 +310,7 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; }
+        .back { background: #666; border: 2px solid #333; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
@@ -612,12 +440,12 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
 	ws.renderHTML(w, tmpl)
 }
 
-func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
+func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>HTTP配置 - OPC DA Collector</title>
+    <title>MQTT配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -625,105 +453,124 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
         h1 { color: #333; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; }
+        .back { background: #666; border: 2px solid #333; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🌐 HTTP配置</h1>
+        <h1>📡 MQTT配置</h1>
         <a href="/" class="back">← 返回首页</a>
 
-        <form id="httpForm">
+        <form id="mqttForm">
             <div class="form-group">
-                <label>启用HTTP</label>
+                <label>启用MQTT</label>
                 <select id="enabled" name="enabled">
                     <option value="false">否</option>
                     <option value="true">是</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>HTTP URL</label>
-                <input type="text" id="url" name="url" placeholder="例如: http://172.16.32.98:8080/api/data">
+                <label>Broker地址</label>
+                <input type="text" id="broker" name="broker" placeholder="例如: 172.16.32.98">
             </div>
             <div class="form-group">
-                <label>请求方法</label>
-                <select id="method" name="method">
-                    <option value="POST">POST</option>
-                    <option value="GET">GET</option>
+                <label>端口</label>
+                <input type="number" id="port" name="port" value="1883">
+            </div>
+            <div class="form-group">
+                <label>主题(Topic)</label>
+                <input type="text" id="topic" name="topic" placeholder="例如: opc/data">
+            </div>
+            <div class="form-group">
+                <label>客户端ID</label>
+                <input type="text" id="client_id" name="client_id" placeholder="例如: opc_collector_01">
+            </div>
+            <div class="form-group">
+                <label>QoS</label>
+                <select id="qos" name="qos">
+                    <option value="0">0 - 最多一次</option>
+                    <option value="1" selected>1 - 至少一次</option>
+                    <option value="2">2 - 恰好一次</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>超时时间（毫秒）</label>
-                <input type="number" id="timeout" name="timeout" value="30000">
+                <label>Retain</label>
+                <select id="retain" name="retain">
+                    <option value="false">否</option>
+                    <option value="true">是</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>输出格式</label>
+                <select id="format" name="format">
+                    <option value="full">完整格式</option>
+                    <option value="flat">扁平格式</option>
+                </select>
             </div>
 
-            <button type="button" onclick="saveHttp()">💾 保存配置</button>
-            <button type="button" class="test" onclick="testHttp()">🧪 测试请求</button>
+            <button type="button" onclick="saveMqtt()">💾 保存配置</button>
+            <button type="button" class="test" onclick="testMqtt()">🧪 测试连接</button>
         </form>
 
         <div id="result" style="margin-top: 20px;"></div>
     </div>
 
     <script>
-        async function loadHttp() {
+        async function loadMqtt() {
             const response = await fetch('/api/config');
             const data = await response.json();
-            if (data.success && data.data.http) {
-                const http = data.data.http;
-                document.getElementById('enabled').value = http.enabled?.toString() || 'false';
-                document.getElementById('url').value = http.url || '';
-                document.getElementById('method').value = http.method || 'POST';
-                document.getElementById('timeout').value = http.timeout || 30000;
+            if (data.success && data.data.mqtt) {
+                const mqtt = data.data.mqtt;
+                document.getElementById('enabled').value = mqtt.enabled?.toString() || 'false';
+                document.getElementById('broker').value = mqtt.broker || '';
+                document.getElementById('port').value = mqtt.port || 1883;
+                document.getElementById('topic').value = mqtt.topic || '';
+                document.getElementById('client_id').value = mqtt.client_id || '';
+                document.getElementById('qos').value = mqtt.qos?.toString() || '1';
+                document.getElementById('retain').value = mqtt.retain?.toString() || 'false';
+                document.getElementById('format').value = mqtt.format || 'full';
             }
         }
 
-        async function saveHttp() {
-            const http = {
+        async function saveMqtt() {
+            const mqtt = {
                 enabled: document.getElementById('enabled').value === 'true',
-                url: document.getElementById('url').value,
-                method: document.getElementById('method').value,
-                timeout: parseInt(document.getElementById('timeout').value)
+                broker: document.getElementById('broker').value,
+                port: parseInt(document.getElementById('port').value),
+                topic: document.getElementById('topic').value,
+                client_id: document.getElementById('client_id').value,
+                qos: parseInt(document.getElementById('qos').value),
+                retain: document.getElementById('retain').value === 'true',
+                format: document.getElementById('format').value
             };
 
             const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ http })
+                body: JSON.stringify({ mqtt })
             });
 
             const result = await response.json();
             showResult(result);
         }
 
-        async function testHttp() {
-            const headersStr = document.getElementById('headers').value;
-            const headers = {};
-            if (headersStr) {
-                headersStr.split(';').forEach(pair => {
-                    const [key, value] = pair.split(':');
-                    if (key && value) {
-                        headers[key.trim()] = value.trim();
-                    }
-                });
-            }
+        async function testMqtt() {
+            const mqtt = {
+                broker: document.getElementById('broker').value,
+                port: parseInt(document.getElementById('port').value),
+                client_id: document.getElementById('client_id').value
+            };
 
-            const response = await fetch('/api/http/test', {
+            const response = await fetch('/api/mqtt/test', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    url: document.getElementById('url').value,
-                    method: document.getElementById('method').value,
-                    username: document.getElementById('username').value,
-                    password: document.getElementById('password').value,
-                    timeout: parseInt(document.getElementById('timeout').value),
-                    headers: headers
-                })
+                body: JSON.stringify(mqtt)
             });
 
             const result = await response.json();
@@ -732,14 +579,14 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
 
         function showResult(result) {
             const div = document.getElementById('result');
-                if (result.success) {
+            if (result.success) {
                 div.innerHTML = '<div class="success">✓ ' + (result.message || '操作成功') + '</div>';
             } else {
                 div.innerHTML = '<div class="error">✗ ' + (result.message || '操作失败') + '</div>';
             }
         }
 
-        loadHttp();
+        loadMqtt();
     </script>
 </body>
 </html>
@@ -764,7 +611,7 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; }
+        .back { background: #666; border: 2px solid #333; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
         .rule-item { background: #f9f9f9; padding: 10px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #4CAF50; cursor: move; }
@@ -1012,12 +859,12 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
 	ws.renderHTML(w, tmpl)
 }
 
-func (ws *WebServer) handleWebhookPage(w http.ResponseWriter, r *http.Request) {
+func (ws *WebServer) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Webhook配置 - OPC DA Collector</title>
+    <title>监控配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -1029,19 +876,19 @@ func (ws *WebServer) handleWebhookPage(w http.ResponseWriter, r *http.Request) {
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; }
+        .back { background: #666; border: 2px solid #333; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🔔 Webhook配置</h1>
+        <h1>🔔 监控配置</h1>
         <a href="/" class="back">← 返回首页</a>
 
         <form id="webhookForm">
             <div class="form-group">
-                <label>启用Webhook</label>
+                <label>启用Webhook预警</label>
                 <select id="enabled" name="enabled">
                     <option value="false">否</option>
                     <option value="true">是</option>
@@ -1516,6 +1363,12 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 		if enabled, ok := rtdbData["enabled"].(bool); ok {
 			config.RtdbConfig.Enabled = enabled
+		}
+		if host, ok := rtdbData["host"].(string); ok {
+			config.RtdbConfig.Host = host
+		}
+		if port, ok := rtdbData["port"].(float64); ok {
+			config.RtdbConfig.Port = int(port)
 		}
 		if format, ok := rtdbData["format"].(string); ok {
 			config.RtdbConfig.Format = format
