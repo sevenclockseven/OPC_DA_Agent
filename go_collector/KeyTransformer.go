@@ -8,7 +8,8 @@ import (
 )
 
 type KeyTransformer struct {
-	rules []TransformRule
+	rules  []TransformRule
+	enabled bool
 }
 
 type TransformRule struct {
@@ -29,7 +30,8 @@ type TransformConfig struct {
 
 func NewKeyTransformer() *KeyTransformer {
 	return &KeyTransformer{
-		rules: []TransformRule{},
+		rules:   []TransformRule{},
+		enabled: true,
 	}
 }
 
@@ -44,8 +46,17 @@ func (kt *KeyTransformer) LoadFromFile(path string) error {
 		return err
 	}
 
+	kt.enabled = config.Enabled
 	kt.rules = config.Rules
 	return nil
+}
+
+func (kt *KeyTransformer) SetEnabled(enabled bool) {
+	kt.enabled = enabled
+}
+
+func (kt *KeyTransformer) IsEnabled() bool {
+	return kt.enabled
 }
 
 func (kt *KeyTransformer) AddRule(rule TransformRule) {
@@ -54,6 +65,10 @@ func (kt *KeyTransformer) AddRule(rule TransformRule) {
 
 func (kt *KeyTransformer) Transform(originalKey string) string {
 	if originalKey == "" {
+		return originalKey
+	}
+
+	if !kt.enabled {
 		return originalKey
 	}
 
@@ -132,4 +147,15 @@ func (kt *KeyTransformer) ImportRules(rules []TransformRule) {
 
 func (kt *KeyTransformer) ClearRules() {
 	kt.rules = []TransformRule{}
+}
+
+func (kt *KeyTransformer) GetStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"enabled":   kt.enabled,
+		"rule_count": len(kt.rules),
+	}
+}
+
+func (kt *KeyTransformer) TestTransform(key string) string {
+	return kt.Transform(key)
 }

@@ -55,6 +55,7 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/api/transform/preview", ws.handleTransformPreview).Methods("POST")
 	r.HandleFunc("/api/transform/rules", ws.handleGetTransformRules).Methods("GET")
 	r.HandleFunc("/api/transform/rules", ws.handleUpdateTransformRules).Methods("POST")
+	r.HandleFunc("/api/transform/debug", ws.handleTransformDebug).Methods("GET")
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Web服务器启动在 http://localhost%s\n", addr)
@@ -1305,6 +1306,35 @@ func (ws *WebServer) handleUpdateTransformRules(w http.ResponseWriter, r *http.R
 	}
 
 	ws.writeJSON(w, true, "规则已保存到 transform.json", nil)
+}
+
+func (ws *WebServer) handleTransformDebug(w http.ResponseWriter, r *http.Request) {
+	debugInfo := map[string]interface{}{
+		"transformer_enabled": ws.transformer.IsEnabled(),
+		"rule_count":          len(ws.transformer.ExportRules()),
+		"rules":               ws.transformer.ExportRules(),
+	}
+
+	data, err := os.ReadFile("transform.json")
+	if err != nil {
+		debugInfo["file_error"] = err.Error()
+	} else {
+		debugInfo["file_content"] = string(data)
+	}
+
+	testKeys := []string{
+		"Channel2.Device1.Value",
+		"lt.sc.20251_M4102_ZZT",
+		"10011_Channel2.Device1",
+	}
+
+	testResults := make(map[string]string)
+	for _, key := range testKeys {
+		testResults[key] = ws.transformer.TestTransform(key)
+	}
+	debugInfo["test_results"] = testResults
+
+	ws.writeJSON(w, true, "调试信息", debugInfo)
 }
 
 // 辅助函数
