@@ -49,6 +49,7 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/api/config", ws.handleUpdateConfig).Methods("POST")
 	r.HandleFunc("/api/config/validate", ws.handleValidateConfig).Methods("POST")
 	r.HandleFunc("/api/mqtt/test", ws.handleMqttTest).Methods("POST")
+	r.HandleFunc("/api/rtdb/test", ws.handleRtdbTest).Methods("POST")
 	r.HandleFunc("/api/http/test", ws.handleHttpTest).Methods("POST")
 	r.HandleFunc("/api/transform/preview", ws.handleTransformPreview).Methods("POST")
 	r.HandleFunc("/api/transform/rules", ws.handleGetTransformRules).Methods("GET")
@@ -480,6 +481,7 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
         input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
+        .test { background: #2196F3; }
         .back { background: #666; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
@@ -512,6 +514,7 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
             </div>
 
             <button type="button" onclick="saveRtdb()">💾 保存配置</button>
+            <button type="button" class="test" onclick="testRtdb()">🧪 测试连接</button>
         </form>
 
         <div id="result" style="margin-top: 20px;"></div>
@@ -551,6 +554,27 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ rtdb })
+            });
+
+            const result = await response.json();
+            showResult(result);
+        }
+
+        async function testRtdb() {
+            let format = document.getElementById('format').value;
+            if (format === 'custom') {
+                format = document.getElementById('custom_format').value;
+            }
+
+            const rtdb = {
+                enabled: true,
+                format: format
+            };
+
+            const response = await fetch('/api/rtdb/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(rtdb)
             });
 
             const result = await response.json();
@@ -1211,6 +1235,43 @@ func (ws *WebServer) handleMqttTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ws.writeJSON(w, true, "MQTT连接成功", nil)
+}
+
+func (ws *WebServer) handleRtdbTest(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		ws.writeJSON(w, false, "读取请求失败", nil)
+		return
+	}
+
+	var rtdbConfig RtdbConfig
+	if err := json.Unmarshal(body, &rtdbConfig); err != nil {
+		ws.writeJSON(w, false, "JSON解析失败", nil)
+		return
+	}
+
+	testMessage := map[string]interface{}{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"values": map[string]interface{}{
+			"test_tag": 123.45,
+		},
+		"metadata": map[string]map[string]interface{}{
+			"test_tag": {"quality": 192},
+		},
+	}
+
+	client := NewRtdbClient(&rtdbConfig)
+	if err := client.Connect(); err != nil {
+		ws.writeJSON(w, false, fmt.Sprintf("RTDB初始化失败: %v", err), nil)
+		return
+	}
+
+	if err := client.Send(testMessage); err != nil {
+		ws.writeJSON(w, false, fmt.Sprintf("RTDB发送失败: %v", err), nil)
+		return
+	}
+
+	ws.writeJSON(w, true, "RTDB测试数据已发送", nil)
 }
 
 func (ws *WebServer) handleHttpTest(w http.ResponseWriter, r *http.Request) {
