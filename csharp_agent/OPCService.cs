@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
-using Interop.OPCAutomation;
+using OPCAutomation;
 
 namespace OPC_DA_Agent
 {
