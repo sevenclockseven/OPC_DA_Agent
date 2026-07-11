@@ -47,22 +47,11 @@ namespace OPC_DA_Agent
                 // 初始化OPC服务
                 _opcService = new OPCService(_config, _logger, configPath);
 
-                // 连接到OPC服务器
-                if (!_opcService.Connect())
-                {
-                    _logger.Error("无法连接到OPC服务器，程序退出");
-                    Console.WriteLine("无法连接到OPC服务器，请检查配置。");
-                    Console.WriteLine("按任意键退出...");
-                    Console.ReadKey();
-                    return;
-                }
+                // 连接到OPC服务器（连接失败不退出程序，仍然启动 Web UI）
+                _opcService.Connect();
 
-                // 启动数据采集（tags 为空时也可以启动，仅创建 Group，之后通过 Web UI 添加标签）
-                if (!_opcService.Start())
-                {
-                    _logger.Error("无法启动数据采集，程序退出");
-                    return;
-                }
+                // 启动数据采集（tags 为空或连接失败时也可以启动 Group）
+                _opcService.Start();
 
                 // 初始化HTTP服务器
                 _httpServer = new HttpServer(_config, _opcService, _logger);

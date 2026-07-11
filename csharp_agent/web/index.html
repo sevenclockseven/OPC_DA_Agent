@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OPC DA 数据采集代理 - 标签配置</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Microsoft YaHei","Segoe UI",sans-serif;background:#1e1e2e;color:#cdd6f4}
+.container{display:flex;height:100vh}
+.left{width:55%;border-right:1px solid #45475a;overflow:auto;padding:16px}
+.right{width:45%;padding:16px;overflow:auto}
+h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
+.node{cursor:pointer;padding:4px 8px;border-radius:6px;margin:2px 0;font-size:14px}
+.node:hover{background:#313244}
+.node.branch{color:#89b4fa}
+.node.leaf{color:#a6e3a1}
+.node.selected{background:#45475a}
+.children{margin-left:20px;display:none}
+.children.open{display:block}
+.btn{padding:8px 20px;border:none;border-radius:8px;background:#cba6f7;color:#1e1e2e;font-weight:bold;cursor:pointer;margin:8px 0}
+.btn:hover{background:#b4befe}
+.tag-list{list-style:none;margin:8px 0}
+.tag-item{padding:6px 12px;background:#313244;border-radius:6px;margin:4px 0;display:flex;justify-content:space-between;align-items:center}
+.tag-remove{color:#f38ba8;cursor:pointer;font-weight:bold}
+.status-bar{position:fixed;bottom:0;left:0;right:0;background:#181825;padding:8px 16px;font-size:12px;color:#6c7086}
+.connected{color:#a6e3a1}.disconnected{color:#f38ba8}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="left">
+    <h2>OPC 节点浏览</h2>
+    <button class="btn" id="btnBrowse" type="button">浏览根节点</button>
+    <div id="tree"></div>
+  </div>
+  <div class="right">
+    <h2>已选标签</h2>
+    <button class="btn" id="btnSave" type="button">保存并应用</button>
+    <ul class="tag-list" id="tagList"></ul>
+  </div>
+</div>
+<div class="status-bar" id="statusBar">连接中...</div>
+<script>
+(function() {
+  var selected = {};
+  var base = window.location.origin;
+
+  function api(path, method, data, cb) {
+    var x = new XMLHttpRequest();
+    x.open(method || 'GET', base + path);
+    x.setRequestHeader('Content-Type', 'application/json');
+    x.timeout = 10000;
+    x.onload = function() {
+      if (x.status >= 200 && x.status < 300) {
+        try { cb(JSON.parse(x.responseText)); }
+        catch(e) { cb({success:false, message:'JSON解析失败: ' + e.message}); }
+      } else {
+        cb({success:false, message:'HTTP ' + x.status});
+      }
+    };
+    x.onerror = function() { cb({success:false, message:'网络错误'}); };
+    x.ontimeout = function() { cb({success:false, message:'请求超时'}); };
+    x.send(data ? JSON.stringify(data) : null);
+  }
+
+  function loadRoot() {
+    document.getElementById('tree').innerHTML = '<p>加载中...</p>';
+    api('/api/browse', 'GET', null, function(r) {
+      if (r.success) renderTree('tree', r.data);
+      else document.getElementById('tree').innerHTML = '<p style="color:#f38ba8">错误: ' + r.message + '</p>';
+    });
+  }
+
+  function renderTree(parentId, nodes) {
+    var parent = document.getElementById(parentId);
+    if (!parent) return;
+    parent.innerHTML = '';
+    if (!nodes || nodes.length === 0) {
+      parent.innerHTML = '<p style="color:#6c7086">（无子节点）</p>';
+      return;
+    }
+    nodes.forEach(function(n) {
+      var div = document.createElement('div');
+      var nodeDiv = document.createElement('div');
+      var folder = !!n.isFolder;
+      nodeDiv.className = 'node ' + (folder ? 'branch' : 'leaf');
+      nodeDiv.textContent = (folder ? '> ' : '# ') + n.name;
+      nodeDiv.onclick = (function(node, pId) {
+        return function() {
+          if (node.isFolder) {
+            var childrenDiv = document.getElementById('children-' + pId + '-' + node.nodeId);
+            if (!childrenDiv) return;
+            if (childrenDiv.classList.contains('open')) {
+              childrenDiv.classList.remove('open');
+            } else {
+              if (!childrenDiv.dataset.loaded) {
+                loadChildren('children-' + pId + '-' + node.nodeId, node.nodeId);
+              }
+              childrenDiv.classList.add('open');
+            }
+          } else {
+            toggleTag(node);
+            nodeDiv.classList.toggle('selected');
+          }
+        };
+      })(n, parentId);
+      div.appendChild(nodeDiv);
+
+      if (folder) {
+        var childrenDiv = document.createElement('div');
+        childrenDiv.id = 'children-' + parentId + '-' + n.nodeId;
+        childrenDiv.className = 'children';
+        div.appendChild(childrenDiv);
+      }
+      parent.appendChild(div);
+    });
+  }
+
+  function loadChildren(containerId, nodeId) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '<p style="color:#6c7086">加载中...</p>';
+    var url = '/api/browse/node?nodeId=' + encodeURIComponent(nodeId);
+    api(url, 'GET', null, function(r) {
+      if (r.success) { renderTree(containerId, r.data); container.dataset.loaded = '1'; }
+      else container.innerHTML = '<p style="color:#f38ba8">' + r.message + '</p>';
+    });
+  }
+
+  function toggleTag(node) {
+    if (selected[node.nodeId]) { delete selected[node.nodeId]; }
+    else {
+      selected[node.nodeId] = { node_id: node.nodeId, name: node.name, description: '', data_type: '', enabled: true, active: true };
+    }
+    renderTagList();
+  }
+
+  function renderTagList() {
+    var ul = document.getElementById('tagList');
+    ul.innerHTML = '';
+    var keys = Object.keys(selected);
+    if (keys.length === 0) { ul.innerHTML = '<p style="color:#6c7086">未选择任何标签</p>'; return; }
+    keys.forEach(function(id) {
+      var t = selected[id];
+      var li = document.createElement('li');
+      li.className = 'tag-item';
+      var removeSpan = document.createElement('span');
+      removeSpan.className = 'tag-remove';
+      removeSpan.textContent = 'x';
+      removeSpan.onclick = (function(id1) { return function() { removeTag(id1); }; })(id);
+      var nameSpan = document.createElement('span');
+      nameSpan.textContent = t.name;
+      li.appendChild(nameSpan);
+      li.appendChild(removeSpan);
+      ul.appendChild(li);
+    });
+  }
+
+  function removeTag(id) { delete selected[id]; renderTagList(); }
+
+  function saveTags() {
+    var keys = Object.keys(selected);
+    if (keys.length === 0) { alert('请先选择标签'); return; }
+    var tags = keys.map(function(id) { return selected[id]; });
+    api('/api/tags', 'POST', { tags: tags }, function(r) {
+      if (r.success) alert(r.message || '保存成功');
+      else alert('保存失败: ' + r.message);
+    });
+  }
+
+  function loadStatus() {
+    api('/api/status', 'GET', null, function(r) {
+      var sb = document.getElementById('statusBar');
+      if (r.success && r.data) {
+        var s = r.data;
+        var cls = s.isConnected ? 'connected' : 'disconnected';
+        var text = s.isConnected ? '已连接' : '未连接';
+        sb.innerHTML = '<span class="' + cls + '">● ' + text + '</span> | 标签: ' + s.tagCount + ' | 读取: ' + s.totalReads + ' | 错误: ' + s.totalErrors + ' | 运行: ' + Math.floor(s.uptimeSeconds) + '秒';
+      } else {
+        sb.innerHTML = '<span class="disconnected">● HTTP错误</span> | ' + (r.message || '未知错误');
+      }
+    });
+  }
+
+  document.getElementById('btnBrowse').onclick = loadRoot;
+  document.getElementById('btnSave').onclick = saveTags;
+
+  loadRoot();
+  loadStatus();
+  setInterval(loadStatus, 3000);
+})();
+</script>
+</body>
+</html>
