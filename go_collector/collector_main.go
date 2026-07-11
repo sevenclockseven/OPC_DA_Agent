@@ -152,7 +152,7 @@ func (c *Collector) Start() error {
 	c.running = true
 
 	if c.config.MqttConfig != nil && c.config.MqttConfig.Enabled {
-		c.mqttClient = NewMqttClient(c.config.MqttConfig, c.config.OutputConfig)
+		c.mqttClient = NewMqttClient(c.config.MqttConfig)
 		if err := c.mqttClient.Connect(); err != nil {
 			return fmt.Errorf("MQTT连接失败: %v", err)
 		}
@@ -287,16 +287,14 @@ func (c *Collector) buildTagMapping() map[string]string {
 
 // MqttClient MQTT客户端
 type MqttClient struct {
-	config       *MqttConfig
-	outputConfig *OutputConfig
-	client       mqtt.Client
-	connected    bool
+	config *MqttConfig
+	client mqtt.Client
+	connected bool
 }
 
-func NewMqttClient(config *MqttConfig, outputConfig *OutputConfig) *MqttClient {
+func NewMqttClient(config *MqttConfig) *MqttClient {
 	return &MqttClient{
-		config:       config,
-		outputConfig: outputConfig,
+		config: config,
 	}
 }
 
@@ -346,8 +344,8 @@ func (c *MqttClient) Publish(message map[string]interface{}) error {
 	var publishData []byte
 	var err error
 
-	if c.outputConfig != nil && c.outputConfig.MqttFormat != "" {
-		publishData, err = c.formatMessage(message, c.outputConfig.MqttFormat)
+	if c.config.Format != "" && c.config.Format != "full" {
+		publishData, err = c.formatMessage(message, c.config.Format)
 	} else {
 		publishData, err = json.Marshal(message)
 	}
@@ -368,10 +366,6 @@ func (c *MqttClient) Publish(message map[string]interface{}) error {
 }
 
 func (c *MqttClient) formatMessage(message map[string]interface{}, format string) ([]byte, error) {
-	if format == "full" || format == "" {
-		return json.Marshal(message)
-	}
-
 	if format == "flat" {
 		if values, ok := message["values"].(map[string]interface{}); ok {
 			return json.Marshal(values)
@@ -379,14 +373,6 @@ func (c *MqttClient) formatMessage(message map[string]interface{}, format string
 		return json.Marshal(message)
 	}
 
-	if format == "custom" && c.outputConfig.MqttJsTransform != "" {
-		return c.applyJsTransform(message, c.outputConfig.MqttJsTransform)
-	}
-
-	return json.Marshal(message)
-}
-
-func (c *MqttClient) applyJsTransform(message map[string]interface{}, jsCode string) ([]byte, error) {
 	return json.Marshal(message)
 }
 

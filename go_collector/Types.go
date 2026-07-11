@@ -1,24 +1,13 @@
 package main
 
 type AppConfig struct {
-	Title      string           `json:"title" ini:"title"`
-	OpcServer  string           `json:"opc_server" ini:"opc_server"`
-	MqttConfig *MqttConfig      `json:"mqtt,omitempty"`
-	HttpConfig *HttpConfig      `json:"http,omitempty"`
-	OutputConfig *OutputConfig  `json:"output,omitempty"`
-	Tasks      []*TaskConfig    `json:"tasks,omitempty"`
-}
-
-type MqttConfig struct {
-	Enabled  bool   `json:"enabled" ini:"enabled"`
-	Broker   string `json:"broker" ini:"broker"`
-	Port     int    `json:"port" ini:"port"`
-	Topic    string `json:"topic" ini:"topic"`
-	Username string `json:"username,omitempty" ini:"username"`
-	Password string `json:"password,omitempty" ini:"password"`
-	ClientId string `json:"client_id" ini:"client_id"`
-	Qos      int    `json:"qos" ini:"qos"`
-	Retain   bool   `json:"retain" ini:"retain"`
+	Title       string           `json:"title" ini:"title"`
+	OpcServer   string           `json:"opc_server" ini:"opc_server"`
+	HttpConfig  *HttpConfig      `json:"http,omitempty"`
+	MqttConfig  *MqttConfig      `json:"mqtt,omitempty"`
+	RtdbConfig  *RtdbConfig      `json:"rtdb,omitempty"`
+	WebhookConfig *WebhookConfig `json:"webhook,omitempty"`
+	Tasks       []*TaskConfig    `json:"tasks,omitempty"`
 }
 
 type HttpConfig struct {
@@ -28,10 +17,29 @@ type HttpConfig struct {
 	Timeout int    `json:"timeout" ini:"timeout"`
 }
 
-type OutputConfig struct {
-	MqttFormat  string `json:"mqtt_format" ini:"mqtt_format"`
-	RtdbFormat  string `json:"rtdb_format" ini:"rtdb_format"`
-	MqttJsTransform string `json:"mqtt_js_transform" ini:"mqtt_js_transform"`
+type MqttConfig struct {
+	Enabled    bool   `json:"enabled" ini:"enabled"`
+	Broker     string `json:"broker" ini:"broker"`
+	Port       int    `json:"port" ini:"port"`
+	Topic      string `json:"topic" ini:"topic"`
+	Username   string `json:"username,omitempty" ini:"username"`
+	Password   string `json:"password,omitempty" ini:"password"`
+	ClientId   string `json:"client_id" ini:"client_id"`
+	Qos        int    `json:"qos" ini:"qos"`
+	Retain     bool   `json:"retain" ini:"retain"`
+	Format     string `json:"format" ini:"format"`
+	JsTransform string `json:"js_transform" ini:"js_transform"`
+}
+
+type RtdbConfig struct {
+	Enabled bool   `json:"enabled" ini:"enabled"`
+	Format  string `json:"format" ini:"format"`
+}
+
+type WebhookConfig struct {
+	Enabled bool     `json:"enabled" ini:"enabled"`
+	Url     string   `json:"url" ini:"url"`
+	Events  []string `json:"events" ini:"events"`
 }
 
 type TaskConfig struct {
