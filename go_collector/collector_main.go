@@ -151,22 +151,19 @@ func NewCollector(config *AppConfig) *Collector {
 func (c *Collector) Start() error {
 	c.running = true
 
-	// 初始化MQTT
 	if c.config.MqttConfig != nil && c.config.MqttConfig.Enabled {
-		c.mqttClient = NewMqttClient(c.config.MqttConfig)
+		c.mqttClient = NewMqttClient(c.config.MqttConfig, c.config.OutputConfig)
 		if err := c.mqttClient.Connect(); err != nil {
 			return fmt.Errorf("MQTT连接失败: %v", err)
 		}
 		fmt.Println("✓ MQTT连接成功")
 	}
 
-	// 初始化HTTP
 	if c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
 		c.httpClient = NewHttpClient(c.config.HttpConfig)
 		fmt.Println("✓ HTTP配置完成")
 	}
 
-	// 启动采集任务
 	go c.collectLoop()
 
 	return nil
@@ -290,14 +287,16 @@ func (c *Collector) buildTagMapping() map[string]string {
 
 // MqttClient MQTT客户端
 type MqttClient struct {
-	config    *MqttConfig
-	client    mqtt.Client
-	connected bool
+	config       *MqttConfig
+	outputConfig *OutputConfig
+	client       mqtt.Client
+	connected    bool
 }
 
-func NewMqttClient(config *MqttConfig) *MqttClient {
+func NewMqttClient(config *MqttConfig, outputConfig *OutputConfig) *MqttClient {
 	return &MqttClient{
-		config: config,
+		config:       config,
+		outputConfig: outputConfig,
 	}
 }
 
@@ -344,13 +343,21 @@ func (c *MqttClient) Publish(message map[string]interface{}) error {
 		return fmt.Errorf("MQTT未连接")
 	}
 
-	jsonData, err := json.Marshal(message)
+	var publishData []byte
+	var err error
+
+	if c.outputConfig != nil && c.outputConfig.MqttFormat != "" {
+		publishData, err = c.formatMessage(message, c.outputConfig.MqttFormat)
+	} else {
+		publishData, err = json.Marshal(message)
+	}
+
 	if err != nil {
 		return fmt.Errorf("JSON序列化失败: %v", err)
 	}
 
 	qos := byte(c.config.Qos)
-	token := c.client.Publish(c.config.Topic, qos, c.config.Retain, string(jsonData))
+	token := c.client.Publish(c.config.Topic, qos, c.config.Retain, string(publishData))
 	if token.Wait() && token.Error() != nil {
 		log.Printf("MQTT发布失败: %v", token.Error())
 		return token.Error()
@@ -358,6 +365,29 @@ func (c *MqttClient) Publish(message map[string]interface{}) error {
 
 	log.Printf("MQTT发布成功: %s", c.config.Topic)
 	return nil
+}
+
+func (c *MqttClient) formatMessage(message map[string]interface{}, format string) ([]byte, error) {
+	if format == "full" || format == "" {
+		return json.Marshal(message)
+	}
+
+	if format == "flat" {
+		if values, ok := message["values"].(map[string]interface{}); ok {
+			return json.Marshal(values)
+		}
+		return json.Marshal(message)
+	}
+
+	if format == "custom" && c.outputConfig.MqttJsTransform != "" {
+		return c.applyJsTransform(message, c.outputConfig.MqttJsTransform)
+	}
+
+	return json.Marshal(message)
+}
+
+func (c *MqttClient) applyJsTransform(message map[string]interface{}, jsCode string) ([]byte, error) {
+	return json.Marshal(message)
 }
 
 func (c *MqttClient) Disconnect() {

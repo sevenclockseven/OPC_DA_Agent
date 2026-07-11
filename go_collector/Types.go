@@ -1,11 +1,12 @@
 package main
 
 type AppConfig struct {
-	Title     string `json:"title" ini:"title"`
-	OpcServer string `json:"opc_server" ini:"opc_server"`
-	MqttConfig *MqttConfig `json:"mqtt,omitempty"`
-	HttpConfig *HttpConfig `json:"http,omitempty"`
-	Tasks []*TaskConfig `json:"tasks,omitempty"`
+	Title      string           `json:"title" ini:"title"`
+	OpcServer  string           `json:"opc_server" ini:"opc_server"`
+	MqttConfig *MqttConfig      `json:"mqtt,omitempty"`
+	HttpConfig *HttpConfig      `json:"http,omitempty"`
+	OutputConfig *OutputConfig  `json:"output,omitempty"`
+	Tasks      []*TaskConfig    `json:"tasks,omitempty"`
 }
 
 type MqttConfig struct {
@@ -25,6 +26,12 @@ type HttpConfig struct {
 	Url     string `json:"url" ini:"url"`
 	Method  string `json:"method" ini:"method"`
 	Timeout int    `json:"timeout" ini:"timeout"`
+}
+
+type OutputConfig struct {
+	MqttFormat  string `json:"mqtt_format" ini:"mqtt_format"`
+	RtdbFormat  string `json:"rtdb_format" ini:"rtdb_format"`
+	MqttJsTransform string `json:"mqtt_js_transform" ini:"mqtt_js_transform"`
 }
 
 type TaskConfig struct {

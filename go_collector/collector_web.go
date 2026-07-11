@@ -364,6 +364,20 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 </select>
             </div>
 
+            <h3>发送格式配置</h3>
+            <div class="form-group">
+                <label>MQTT发送格式</label>
+                <select id="mqtt_format" name="mqtt_format">
+                    <option value="full">完整格式（包含timestamp, values, metadata）</option>
+                    <option value="flat">扁平格式（仅values）</option>
+                    <option value="custom">自定义格式（JS转换）</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>JS转换代码（仅自定义格式）</label>
+                <textarea id="mqtt_js_transform" name="mqtt_js_transform" rows="4" placeholder="function(data) { return data; }"></textarea>
+            </div>
+
             <button type="button" onclick="saveMqtt()">💾 保存配置</button>
             <button type="button" class="test" onclick="testMqtt()">🧪 测试连接</button>
         </form>
@@ -387,6 +401,11 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('qos').value = mqtt.qos?.toString() || '1';
                 document.getElementById('retain').value = mqtt.retain?.toString() || 'false';
             }
+            if (data.success && data.data.output) {
+                const output = data.data.output;
+                document.getElementById('mqtt_format').value = output.mqtt_format || 'full';
+                document.getElementById('mqtt_js_transform').value = output.mqtt_js_transform || '';
+            }
         }
 
         async function saveMqtt() {
@@ -402,10 +421,15 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 retain: document.getElementById('retain').value === 'true'
             };
 
+            const output = {
+                mqtt_format: document.getElementById('mqtt_format').value,
+                mqtt_js_transform: document.getElementById('mqtt_js_transform').value
+            };
+
             const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mqtt })
+                body: JSON.stringify({ mqtt, output })
             });
 
             const result = await response.json();
@@ -503,9 +527,19 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 <label>超时时间（毫秒）</label>
                 <input type="number" id="timeout" name="timeout" value="30000">
             </div>
+
+            <h3>RTDB发送格式配置</h3>
             <div class="form-group">
-                <label>请求头（格式: key1:value1;key2:value2）</label>
-                <textarea id="headers" name="headers" rows="3" placeholder="例如: Content-Type:application/json;Authorization:Bearer token123"></textarea>
+                <label>RTDB发送格式</label>
+                <select id="rtdb_format_type" name="rtdb_format_type">
+                    <option value="csv">CSV格式（key,value,quality,timestamp）</option>
+                    <option value="json">JSON格式</option>
+                    <option value="custom">自定义格式</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>自定义格式模板</label>
+                <textarea id="rtdb_format" name="rtdb_format" rows="3" placeholder="例如: {key},{value},{quality},{timestamp}"></textarea>
             </div>
 
             <button type="button" onclick="saveHttp()">💾 保存配置</button>
@@ -524,45 +558,38 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('enabled').value = http.enabled?.toString() || 'false';
                 document.getElementById('url').value = http.url || '';
                 document.getElementById('method').value = http.method || 'POST';
-                document.getElementById('username').value = http.username || '';
-                document.getElementById('password').value = http.password || '';
                 document.getElementById('timeout').value = http.timeout || 30000;
-
-                if (http.headers) {
-                    const headersStr = Object.entries(http.headers)
-                        .map(([k, v]) => k + ':' + v)
-                        .join(';');
-                    document.getElementById('headers').value = headersStr;
+            }
+            if (data.success && data.data.output) {
+                const output = data.data.output;
+                const rtdbFormat = output.rtdb_format || '';
+                if (rtdbFormat === '{key},{value},{quality},{timestamp}') {
+                    document.getElementById('rtdb_format_type').value = 'csv';
+                } else if (rtdbFormat.startsWith('{')) {
+                    document.getElementById('rtdb_format_type').value = 'json';
+                } else {
+                    document.getElementById('rtdb_format_type').value = 'custom';
                 }
+                document.getElementById('rtdb_format').value = rtdbFormat;
             }
         }
 
         async function saveHttp() {
-            const headersStr = document.getElementById('headers').value;
-            const headers = {};
-            if (headersStr) {
-                headersStr.split(';').forEach(pair => {
-                    const [key, value] = pair.split(':');
-                    if (key && value) {
-                        headers[key.trim()] = value.trim();
-                    }
-                });
-            }
-
             const http = {
                 enabled: document.getElementById('enabled').value === 'true',
                 url: document.getElementById('url').value,
                 method: document.getElementById('method').value,
-                username: document.getElementById('username').value,
-                password: document.getElementById('password').value,
-                timeout: parseInt(document.getElementById('timeout').value),
-                headers: headers
+                timeout: parseInt(document.getElementById('timeout').value)
+            };
+
+            const output = {
+                rtdb_format: document.getElementById('rtdb_format').value
             };
 
             const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ http })
+                body: JSON.stringify({ http, output })
             });
 
             const result = await response.json();
@@ -1190,6 +1217,21 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 		if timeout, ok := httpData["timeout"].(float64); ok {
 			config.HttpConfig.Timeout = int(timeout)
+		}
+	}
+
+	if outputData, ok := updates["output"].(map[string]interface{}); ok {
+		if config.OutputConfig == nil {
+			config.OutputConfig = &OutputConfig{}
+		}
+		if mqttFormat, ok := outputData["mqtt_format"].(string); ok {
+			config.OutputConfig.MqttFormat = mqttFormat
+		}
+		if rtdbFormat, ok := outputData["rtdb_format"].(string); ok {
+			config.OutputConfig.RtdbFormat = rtdbFormat
+		}
+		if mqttJsTransform, ok := outputData["mqtt_js_transform"].(string); ok {
+			config.OutputConfig.MqttJsTransform = mqttJsTransform
 		}
 	}
 
