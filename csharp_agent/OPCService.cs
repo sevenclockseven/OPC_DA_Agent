@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using OPCAutomation;
@@ -30,7 +32,7 @@ namespace OPC_DA_Agent
         {
             get
             {
-                try { return _opcServer != null && _opcServer.ServerState == (int)OPCServerState.OPCRunning; }
+                try { return _opcServer != null && _opcServer.ServerState == 1; }
                 catch { return false; }
             }
         }
@@ -94,7 +96,7 @@ namespace OPC_DA_Agent
         /// </summary>
         public bool Start()
         {
-            if (_opcServer == null || _opcServer.ServerState != (int)OPCServerState.OPCRunning)
+            if (_opcServer == null || _opcServer.ServerState != 1)
             {
                 _logger.Error("OPC服务器未连接，无法启动数据采集");
                 return false;
@@ -157,10 +159,8 @@ namespace OPC_DA_Agent
                 {
                     object serverHandles;
                     object errors;
-                    Array opcItems = itemIds.ToArray();
-                    Array clientHandlesArray = clientHandles.ToArray();
 
-                    _opcGroup.OPCItems.AddItems(itemIds.Count, opcItems, clientHandlesArray, out serverHandles, out errors);
+                    _opcGroup.OPCItems.AddItems(itemIds.Count, itemIds.ToArray(), clientHandles.ToArray(), out serverHandles, out errors);
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
 
                     lock (_lock)
@@ -216,7 +216,7 @@ namespace OPC_DA_Agent
                 Array qualities;
                 Array timestamps;
 
-                _opcGroup.SyncRead((short)OPCDataSource.OPC_DEVICE, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
+                _opcGroup.SyncRead(2, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
 
                 lock (_lock)
                 {
@@ -283,15 +283,27 @@ namespace OPC_DA_Agent
         /// </summary>
         public List<OPCNode> BrowsePath(string nodeId)
         {
-            if (_opcServer == null || _opcServer.ServerState != (int)OPCServerState.OPCRunning)
+            if (_opcServer == null || _opcServer.ServerState != 1)
                 throw new InvalidOperationException("未连接到OPC服务器");
 
             var result = new List<OPCNode>();
             try
             {
-                var browser = _opcServer.OPCBrowser;
+                Type serverType = _opcServer.GetType();
+                PropertyInfo browserProp = serverType.GetProperty("OPCBrowser");
+                if (browserProp == null)
+                {
+                    _logger.Error("[Browse] OPCServer 不支持 OPCBrowser 属性");
+                    return result;
+                }
 
-                browser.ShowLeafs(true);
+                dynamic browser = browserProp.GetValue(_opcServer, null);
+                if (browser == null)
+                {
+                    _logger.Error("[Browse] 无法获取 OPCBrowser");
+                    return result;
+                }
+
                 browser.MoveToRoot();
 
                 if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
@@ -304,8 +316,10 @@ namespace OPC_DA_Agent
                 }
 
                 browser.ShowBranches();
-                foreach (string branch in browser)
+                IEnumerator branchEnum = ((IEnumerable)browser).GetEnumerator();
+                while (branchEnum.MoveNext())
                 {
+                    string branch = branchEnum.Current as string;
                     if (!string.IsNullOrEmpty(branch))
                     {
                         result.Add(new OPCNode
@@ -321,8 +335,10 @@ namespace OPC_DA_Agent
                 }
 
                 browser.ShowLeafs(true);
-                foreach (string leaf in browser)
+                IEnumerator leafEnum = ((IEnumerable)browser).GetEnumerator();
+                while (leafEnum.MoveNext())
                 {
+                    string leaf = leafEnum.Current as string;
                     if (!string.IsNullOrEmpty(leaf))
                     {
                         string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
@@ -355,7 +371,20 @@ namespace OPC_DA_Agent
             {
                 if (_opcGroup != null)
                 {
-                    _opcGroup.OPCItems.RemoveAll();
+                    try
+                    {
+                        int count = _opcGroup.OPCItems.Count;
+                        if (count > 0)
+                        {
+                            Array handles = Array.CreateInstance(typeof(int), count + 1);
+                            for (int i = 1; i <= count; i++)
+                            {
+                                handles.SetValue(i, i);
+                            }
+                            _opcGroup.OPCItems.Remove(count, ref handles);
+                        }
+                    }
+                    catch { }
                 }
 
                 _tags = newTags;
