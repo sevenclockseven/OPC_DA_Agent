@@ -167,11 +167,16 @@ func (c *Collector) Start() error {
 	}
 
 	if c.config.RtdbConfig != nil && c.config.RtdbConfig.Enabled {
-		c.rtdbClient = NewRtdbClient(c.config.RtdbConfig)
-		if err := c.rtdbClient.Connect(); err != nil {
-			return fmt.Errorf("RTDB连接失败: %v", err)
+		if c.config.RtdbConfig.Host != "" && c.config.RtdbConfig.Port > 0 {
+			c.rtdbClient = NewRtdbClient(c.config.RtdbConfig)
+			if err := c.rtdbClient.Connect(); err != nil {
+				log.Printf("⚠️ RTDB连接失败: %v", err)
+			} else {
+				fmt.Println("✓ RTDB连接成功")
+			}
+		} else {
+			log.Println("⚠️ RTDB已启用但地址未配置，跳过连接")
 		}
-		fmt.Println("✓ RTDB连接成功")
 	}
 
 	go c.collectLoop()
