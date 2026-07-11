@@ -20,20 +20,19 @@ namespace OPC_DA_Agent
         [JsonProperty("opc_password")]
         public string OpcPassword { get; set; }
 
-        // Legacy property for backward compatibility
+        private string _opcServerUrl;
+
         [JsonProperty("opc_server_url")]
         public string OpcServerUrl
         {
-            get => OpcServerProgId;
+            get => _opcServerUrl ?? OpcServerProgId;
             set
             {
+                _opcServerUrl = value;
                 if (!string.IsNullOrEmpty(value))
                 {
-                    // Convert opcda:// URL to ProgID
                     if (value.StartsWith("opcda://"))
                     {
-                        // Extract ProgID from opcda:// URL
-                        // opcda://localhost/OPCServer.WinCC -> OPCServer.WinCC
                         var parts = value.Split('/');
                         if (parts.Length > 0)
                         {

@@ -60,9 +60,10 @@ namespace OPC_DA_Agent
         {
             try
             {
-                _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
+                string serverUrl = _config.OpcServerUrl ?? _config.OpcServerProgId;
+                _logger.Info(string.Format("正在连接到OPC服务器: {0}...", serverUrl));
 
-                _opcServer = new Server(_config.OpcServerProgId);
+                _opcServer = new Server(serverUrl);
                 _opcServer.Connect();
 
                 _logger.Info("已连接到OPC服务器");
