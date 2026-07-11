@@ -1,15 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"log"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 )
 
 func main() {
@@ -188,17 +192,23 @@ func (c *Collector) collectLoop() {
 }
 
 func (c *Collector) collectData() {
-	// 这里应该连接OPC服务器并读取数据
-	// 由于OPC DA需要Windows环境，这里模拟数据
+	var rawData []map[string]interface{}
 
-	// 模拟从OPC服务器读取的数据
-	rawData := []map[string]interface{}{
-		{"topic": "lt.sc.20251_M4102_ZZT", "value": 1.0, "quality": 192, "errorCode": 0},
-		{"topic": "lt.sc.20251_M4102_CYBJ", "value": 0.0, "quality": 192, "errorCode": 0},
-		{"topic": "lt.sc.20251_M4102_JYBJ", "value": 0.0, "quality": 192, "errorCode": 0},
+	if c.httpClient != nil && c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
+		fetched, err := c.fetchFromHttp()
+		if err != nil {
+			log.Printf("HTTP获取数据失败: %v", err)
+			return
+		}
+		rawData = fetched
+	} else {
+		rawData = []map[string]interface{}{
+			{"topic": "lt.sc.20251_M4102_ZZT", "value": 1.0, "quality": 192, "errorCode": 0},
+			{"topic": "lt.sc.20251_M4102_CYBJ", "value": 0.0, "quality": 192, "errorCode": 0},
+			{"topic": "lt.sc.20251_M4102_JYBJ", "value": 0.0, "quality": 192, "errorCode": 0},
+		}
 	}
 
-	// 转换为键值对
 	keyValues := make(map[string]interface{})
 	metadata := make(map[string]map[string]interface{})
 
@@ -208,7 +218,6 @@ func (c *Collector) collectData() {
 			value := item["value"]
 			quality := item["quality"]
 
-			// 应用键名转换
 			transformedKey := c.transformer.Transform(topic)
 
 			keyValues[transformedKey] = value
@@ -331,7 +340,51 @@ func NewHttpClient(config *HttpConfig) *HttpClient {
 }
 
 func (c *HttpClient) Send(message map[string]interface{}) {
-	// 简化的发送逻辑
-	// 实际实现需要使用HTTP客户端库
 	fmt.Printf("🌐 HTTP发送到 %s: %v\n", c.config.Url, message)
+}
+
+func (c *Collector) fetchFromHttp() ([]map[string]interface{}, error) {
+	if c.config.HttpConfig == nil || !c.config.HttpConfig.Enabled {
+		return nil, fmt.Errorf("HTTP未启用")
+	}
+
+	client := &http.Client{
+		Timeout: time.Duration(c.config.HttpConfig.Timeout) * time.Millisecond,
+	}
+
+	resp, err := client.Get(c.config.HttpConfig.Url)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	var apiResp struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+		Message string                 `json:"message"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("解析JSON失败: %v", err)
+	}
+
+	if !apiResp.Success {
+		return nil, fmt.Errorf("API返回错误: %s", apiResp.Message)
+	}
+
+	var result []map[string]interface{}
+	for key, value := range apiResp.Data {
+		result = append(result, map[string]interface{}{
+			"topic":     key,
+			"value":     value,
+			"quality":   192,
+			"errorCode": 0,
+		})
+	}
+
+	return result, nil
 }
