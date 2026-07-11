@@ -60,6 +60,13 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.HttpConfig.Timeout, _ = section.Key("timeout").Int()
 	}
 
+	if section := cfg.Section("output"); section != nil {
+		config.OutputConfig = &OutputConfig{}
+		config.OutputConfig.MqttFormat = section.Key("mqtt_format").String()
+		config.OutputConfig.RtdbFormat = section.Key("rtdb_format").String()
+		config.OutputConfig.MqttJsTransform = section.Key("mqtt_js_transform").String()
+	}
+
 	// Task sections
 	fmt.Println("[ConfigManager] 开始解析任务配置...")
 	maxTasks := 100
