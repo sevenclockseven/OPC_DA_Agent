@@ -14,6 +14,9 @@ namespace OPC_DA_Agent
         [JsonProperty("opc_server_prog_id")]
         public string OpcServerProgId { get; set; } = "OPCServer.WinCC";
 
+        [JsonProperty("opc_server_host")]
+        public string OpcServerHost { get; set; } = "localhost";
+
         [JsonProperty("opc_username")]
         public string OpcUsername { get; set; }
 
@@ -25,7 +28,7 @@ namespace OPC_DA_Agent
         [JsonProperty("opc_server_url")]
         public string OpcServerUrl
         {
-            get => _opcServerUrl ?? OpcServerProgId;
+            get => _opcServerUrl ?? string.Format("opcda://{0}/{1}", OpcServerHost, OpcServerProgId);
             set
             {
                 _opcServerUrl = value;
@@ -34,9 +37,14 @@ namespace OPC_DA_Agent
                     if (value.StartsWith("opcda://"))
                     {
                         var parts = value.Split('/');
-                        if (parts.Length > 0)
+                        if (parts.Length >= 4)
                         {
-                            OpcServerProgId = parts[parts.Length - 1];
+                            OpcServerHost = parts[2];
+                            OpcServerProgId = parts[3];
+                        }
+                        else if (parts.Length == 3)
+                        {
+                            OpcServerHost = parts[2];
                         }
                     }
                     else
