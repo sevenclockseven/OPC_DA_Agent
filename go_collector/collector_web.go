@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -40,6 +41,7 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/web/mqtt", ws.handleMqttPage).Methods("GET")
 	r.HandleFunc("/web/http", ws.handleHttpPage).Methods("GET")
 	r.HandleFunc("/web/transform", ws.handleTransformPage).Methods("GET")
+	r.HandleFunc("/web/webhook", ws.handleWebhookPage).Methods("GET")
 
 	// API接口
 	r.HandleFunc("/api/config", ws.handleGetConfig).Methods("GET")
@@ -51,6 +53,7 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/api/transform/rules", ws.handleGetTransformRules).Methods("GET")
 	r.HandleFunc("/api/transform/rules", ws.handleUpdateTransformRules).Methods("POST")
 	r.HandleFunc("/api/transform/debug", ws.handleTransformDebug).Methods("GET")
+	r.HandleFunc("/api/webhook/test", ws.handleWebhookTest).Methods("POST")
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Web服务器启动在 http://localhost%s\n", addr)
@@ -99,6 +102,10 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
             <a href="/web/transform" class="menu-item">
                 <h3>🔄 键名转换</h3>
                 <p>配置转换规则</p>
+            </a>
+            <a href="/web/webhook" class="menu-item">
+                <h3>🔔 Webhook</h3>
+                <p>配置预警推送</p>
             </a>
         </div>
 
@@ -367,15 +374,10 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
             <h3>发送格式配置</h3>
             <div class="form-group">
                 <label>MQTT发送格式</label>
-                <select id="mqtt_format" name="mqtt_format">
+                <select id="format" name="format">
                     <option value="full">完整格式（包含timestamp, values, metadata）</option>
                     <option value="flat">扁平格式（仅values）</option>
-                    <option value="custom">自定义格式（JS转换）</option>
                 </select>
-            </div>
-            <div class="form-group">
-                <label>JS转换代码（仅自定义格式）</label>
-                <textarea id="mqtt_js_transform" name="mqtt_js_transform" rows="4" placeholder="function(data) { return data; }"></textarea>
             </div>
 
             <button type="button" onclick="saveMqtt()">💾 保存配置</button>
@@ -400,11 +402,7 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('client_id').value = mqtt.client_id || '';
                 document.getElementById('qos').value = mqtt.qos?.toString() || '1';
                 document.getElementById('retain').value = mqtt.retain?.toString() || 'false';
-            }
-            if (data.success && data.data.output) {
-                const output = data.data.output;
-                document.getElementById('mqtt_format').value = output.mqtt_format || 'full';
-                document.getElementById('mqtt_js_transform').value = output.mqtt_js_transform || '';
+                document.getElementById('format').value = mqtt.format || 'full';
             }
         }
 
@@ -418,18 +416,14 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 password: document.getElementById('password').value,
                 client_id: document.getElementById('client_id').value,
                 qos: parseInt(document.getElementById('qos').value),
-                retain: document.getElementById('retain').value === 'true'
-            };
-
-            const output = {
-                mqtt_format: document.getElementById('mqtt_format').value,
-                mqtt_js_transform: document.getElementById('mqtt_js_transform').value
+                retain: document.getElementById('retain').value === 'true',
+                format: document.getElementById('format').value
             };
 
             const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mqtt, output })
+                body: JSON.stringify({ mqtt })
             });
 
             const result = await response.json();
@@ -528,20 +522,6 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 <input type="number" id="timeout" name="timeout" value="30000">
             </div>
 
-            <h3>RTDB发送格式配置</h3>
-            <div class="form-group">
-                <label>RTDB发送格式</label>
-                <select id="rtdb_format_type" name="rtdb_format_type">
-                    <option value="csv">CSV格式（key,value,quality,timestamp）</option>
-                    <option value="json">JSON格式</option>
-                    <option value="custom">自定义格式</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>自定义格式模板</label>
-                <textarea id="rtdb_format" name="rtdb_format" rows="3" placeholder="例如: {key},{value},{quality},{timestamp}"></textarea>
-            </div>
-
             <button type="button" onclick="saveHttp()">💾 保存配置</button>
             <button type="button" class="test" onclick="testHttp()">🧪 测试请求</button>
         </form>
@@ -560,18 +540,6 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('method').value = http.method || 'POST';
                 document.getElementById('timeout').value = http.timeout || 30000;
             }
-            if (data.success && data.data.output) {
-                const output = data.data.output;
-                const rtdbFormat = output.rtdb_format || '';
-                if (rtdbFormat === '{key},{value},{quality},{timestamp}') {
-                    document.getElementById('rtdb_format_type').value = 'csv';
-                } else if (rtdbFormat.startsWith('{')) {
-                    document.getElementById('rtdb_format_type').value = 'json';
-                } else {
-                    document.getElementById('rtdb_format_type').value = 'custom';
-                }
-                document.getElementById('rtdb_format').value = rtdbFormat;
-            }
         }
 
         async function saveHttp() {
@@ -582,14 +550,10 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 timeout: parseInt(document.getElementById('timeout').value)
             };
 
-            const output = {
-                rtdb_format: document.getElementById('rtdb_format').value
-            };
-
             const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ http, output })
+                body: JSON.stringify({ http })
             });
 
             const result = await response.json();
@@ -900,6 +864,121 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         }
 
         loadRules();
+    </script>
+</body>
+</html>
+	`
+	ws.renderHTML(w, tmpl)
+}
+
+func (ws *WebServer) handleWebhookPage(w http.ResponseWriter, r *http.Request) {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Webhook配置 - OPC DA Collector</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+        button:hover { background: #45a049; }
+        .test { background: #2196F3; }
+        .back { background: #666; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Webhook配置</h1>
+        <a href="/" class="back">← 返回首页</a>
+
+        <form id="webhookForm">
+            <div class="form-group">
+                <label>启用Webhook</label>
+                <select id="enabled" name="enabled">
+                    <option value="false">否</option>
+                    <option value="true">是</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Webhook URL</label>
+                <input type="text" id="url" name="url" placeholder="例如: https://example.com/webhook">
+            </div>
+            <div class="form-group">
+                <label>触发事件（逗号分隔）</label>
+                <textarea id="events" name="events" rows="3" placeholder="mqtt_error,http_error,collect_error"></textarea>
+            </div>
+
+            <button type="button" onclick="saveWebhook()">💾 保存配置</button>
+            <button type="button" class="test" onclick="testWebhook()">🧪 测试发送</button>
+        </form>
+
+        <div id="result" style="margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        async function loadWebhook() {
+            const response = await fetch('/api/config');
+            const data = await response.json();
+            if (data.success && data.data.webhook) {
+                const webhook = data.data.webhook;
+                document.getElementById('enabled').value = webhook.enabled?.toString() || 'false';
+                document.getElementById('url').value = webhook.url || '';
+                document.getElementById('events').value = (webhook.events || []).join(',');
+            }
+        }
+
+        async function saveWebhook() {
+            const eventsStr = document.getElementById('events').value;
+            const events = eventsStr ? eventsStr.split(',').map(e => e.trim()) : [];
+
+            const webhook = {
+                enabled: document.getElementById('enabled').value === 'true',
+                url: document.getElementById('url').value,
+                events: events
+            };
+
+            const response = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ webhook })
+            });
+
+            const result = await response.json();
+            showResult(result);
+        }
+
+        async function testWebhook() {
+            const response = await fetch('/api/webhook/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: document.getElementById('url').value,
+                    event: 'test',
+                    message: '这是一条测试消息'
+                })
+            });
+
+            const result = await response.json();
+            showResult(result);
+        }
+
+        function showResult(result) {
+            const div = document.getElementById('result');
+            if (result.success) {
+                div.innerHTML = '<div class="success">✓ ' + (result.message || '操作成功') + '</div>';
+            } else {
+                div.innerHTML = '<div class="error">✗ ' + (result.message || '操作失败') + '</div>';
+            }
+        }
+
+        loadWebhook();
     </script>
 </body>
 </html>
@@ -1220,18 +1299,66 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 	}
 
-	if outputData, ok := updates["output"].(map[string]interface{}); ok {
-		if config.OutputConfig == nil {
-			config.OutputConfig = &OutputConfig{}
+	if mqttData, ok := updates["mqtt"].(map[string]interface{}); ok {
+		if config.MqttConfig == nil {
+			config.MqttConfig = &MqttConfig{}
 		}
-		if mqttFormat, ok := outputData["mqtt_format"].(string); ok {
-			config.OutputConfig.MqttFormat = mqttFormat
+		if enabled, ok := mqttData["enabled"].(bool); ok {
+			config.MqttConfig.Enabled = enabled
 		}
-		if rtdbFormat, ok := outputData["rtdb_format"].(string); ok {
-			config.OutputConfig.RtdbFormat = rtdbFormat
+		if broker, ok := mqttData["broker"].(string); ok {
+			config.MqttConfig.Broker = broker
 		}
-		if mqttJsTransform, ok := outputData["mqtt_js_transform"].(string); ok {
-			config.OutputConfig.MqttJsTransform = mqttJsTransform
+		if port, ok := mqttData["port"].(float64); ok {
+			config.MqttConfig.Port = int(port)
+		}
+		if topic, ok := mqttData["topic"].(string); ok {
+			config.MqttConfig.Topic = topic
+		}
+		if clientId, ok := mqttData["client_id"].(string); ok {
+			config.MqttConfig.ClientId = clientId
+		}
+		if qos, ok := mqttData["qos"].(float64); ok {
+			config.MqttConfig.Qos = int(qos)
+		}
+		if retain, ok := mqttData["retain"].(bool); ok {
+			config.MqttConfig.Retain = retain
+		}
+		if format, ok := mqttData["format"].(string); ok {
+			config.MqttConfig.Format = format
+		}
+		if jsTransform, ok := mqttData["js_transform"].(string); ok {
+			config.MqttConfig.JsTransform = jsTransform
+		}
+	}
+
+	if rtdbData, ok := updates["rtdb"].(map[string]interface{}); ok {
+		if config.RtdbConfig == nil {
+			config.RtdbConfig = &RtdbConfig{}
+		}
+		if enabled, ok := rtdbData["enabled"].(bool); ok {
+			config.RtdbConfig.Enabled = enabled
+		}
+		if format, ok := rtdbData["format"].(string); ok {
+			config.RtdbConfig.Format = format
+		}
+	}
+
+	if webhookData, ok := updates["webhook"].(map[string]interface{}); ok {
+		if config.WebhookConfig == nil {
+			config.WebhookConfig = &WebhookConfig{}
+		}
+		if enabled, ok := webhookData["enabled"].(bool); ok {
+			config.WebhookConfig.Enabled = enabled
+		}
+		if url, ok := webhookData["url"].(string); ok {
+			config.WebhookConfig.Url = url
+		}
+		if events, ok := webhookData["events"].([]interface{}); ok {
+			config.WebhookConfig.Events = make([]string, len(events))
+			for i, e := range events {
+				config.WebhookConfig.Events[i] = e.(string)
+			}
 		}
 	}
 
@@ -1270,6 +1397,50 @@ func testHttpConnection(config *HttpConfig) error {
 	}
 
 	return fmt.Errorf("HTTP状态码: %d", resp.StatusCode)
+}
+
+func (ws *WebServer) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		ws.writeJSON(w, false, "读取请求失败", nil)
+		return
+	}
+
+	var request struct {
+		Url     string `json:"url"`
+		Event   string `json:"event"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal(body, &request); err != nil {
+		ws.writeJSON(w, false, "JSON解析失败", nil)
+		return
+	}
+
+	if request.Url == "" {
+		ws.writeJSON(w, false, "Webhook URL不能为空", nil)
+		return
+	}
+
+	payload := map[string]interface{}{
+		"event":   request.Event,
+		"message": request.Message,
+		"source":  "opc_collector",
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	resp, err := http.Post(request.Url, "application/json", strings.NewReader(string(jsonData)))
+	if err != nil {
+		ws.writeJSON(w, false, fmt.Sprintf("发送失败: %v", err), nil)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		ws.writeJSON(w, true, "Webhook测试成功", nil)
+	} else {
+		ws.writeJSON(w, false, fmt.Sprintf("Webhook返回状态码: %d", resp.StatusCode), nil)
+	}
 }
 
 func (ws *WebServer) writeJSON(w http.ResponseWriter, success bool, message string, data interface{}) {

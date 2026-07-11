@@ -38,6 +38,14 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.OpcServer = section.Key("opc_server").String()
 	}
 
+	if section := cfg.Section("http"); section != nil {
+		config.HttpConfig = &HttpConfig{}
+		config.HttpConfig.Enabled, _ = section.Key("enabled").Bool()
+		config.HttpConfig.Url = section.Key("url").String()
+		config.HttpConfig.Method = section.Key("method").String()
+		config.HttpConfig.Timeout, _ = section.Key("timeout").Int()
+	}
+
 	if section := cfg.Section("mqtt"); section != nil {
 		config.MqttConfig = &MqttConfig{}
 		config.MqttConfig.Enabled, _ = section.Key("enabled").Bool()
@@ -49,22 +57,24 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.MqttConfig.ClientId = section.Key("client_id").String()
 		config.MqttConfig.Qos, _ = section.Key("qos").Int()
 		config.MqttConfig.Retain, _ = section.Key("retain").Bool()
+		config.MqttConfig.Format = section.Key("format").String()
+		config.MqttConfig.JsTransform = section.Key("js_transform").String()
 	}
 
-	// HTTP section
-	if section := cfg.Section("http"); section != nil {
-		config.HttpConfig = &HttpConfig{}
-		config.HttpConfig.Enabled, _ = section.Key("enabled").Bool()
-		config.HttpConfig.Url = section.Key("url").String()
-		config.HttpConfig.Method = section.Key("method").String()
-		config.HttpConfig.Timeout, _ = section.Key("timeout").Int()
+	if section := cfg.Section("rtdb"); section != nil {
+		config.RtdbConfig = &RtdbConfig{}
+		config.RtdbConfig.Enabled, _ = section.Key("enabled").Bool()
+		config.RtdbConfig.Format = section.Key("format").String()
 	}
 
-	if section := cfg.Section("output"); section != nil {
-		config.OutputConfig = &OutputConfig{}
-		config.OutputConfig.MqttFormat = section.Key("mqtt_format").String()
-		config.OutputConfig.RtdbFormat = section.Key("rtdb_format").String()
-		config.OutputConfig.MqttJsTransform = section.Key("mqtt_js_transform").String()
+	if section := cfg.Section("webhook"); section != nil {
+		config.WebhookConfig = &WebhookConfig{}
+		config.WebhookConfig.Enabled, _ = section.Key("enabled").Bool()
+		config.WebhookConfig.Url = section.Key("url").String()
+		eventsStr := section.Key("events").String()
+		if eventsStr != "" {
+			config.WebhookConfig.Events = strings.Split(eventsStr, ",")
+		}
 	}
 
 	// Task sections
@@ -146,6 +156,14 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 	section.NewKey("title", config.Title)
 	section.NewKey("opc_server", config.OpcServer)
 
+	if config.HttpConfig != nil {
+		section = cfg.Section("http")
+		section.NewKey("enabled", fmt.Sprintf("%v", config.HttpConfig.Enabled))
+		section.NewKey("url", config.HttpConfig.Url)
+		section.NewKey("method", config.HttpConfig.Method)
+		section.NewKey("timeout", fmt.Sprintf("%d", config.HttpConfig.Timeout))
+	}
+
 	if config.MqttConfig != nil {
 		section = cfg.Section("mqtt")
 		section.NewKey("enabled", fmt.Sprintf("%v", config.MqttConfig.Enabled))
@@ -157,14 +175,21 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		section.NewKey("client_id", config.MqttConfig.ClientId)
 		section.NewKey("qos", fmt.Sprintf("%d", config.MqttConfig.Qos))
 		section.NewKey("retain", fmt.Sprintf("%v", config.MqttConfig.Retain))
+		section.NewKey("format", config.MqttConfig.Format)
+		section.NewKey("js_transform", config.MqttConfig.JsTransform)
 	}
 
-	if config.HttpConfig != nil {
-		section = cfg.Section("http")
-		section.NewKey("enabled", fmt.Sprintf("%v", config.HttpConfig.Enabled))
-		section.NewKey("url", config.HttpConfig.Url)
-		section.NewKey("method", config.HttpConfig.Method)
-		section.NewKey("timeout", fmt.Sprintf("%d", config.HttpConfig.Timeout))
+	if config.RtdbConfig != nil {
+		section = cfg.Section("rtdb")
+		section.NewKey("enabled", fmt.Sprintf("%v", config.RtdbConfig.Enabled))
+		section.NewKey("format", config.RtdbConfig.Format)
+	}
+
+	if config.WebhookConfig != nil {
+		section = cfg.Section("webhook")
+		section.NewKey("enabled", fmt.Sprintf("%v", config.WebhookConfig.Enabled))
+		section.NewKey("url", config.WebhookConfig.Url)
+		section.NewKey("events", strings.Join(config.WebhookConfig.Events, ","))
 	}
 
 	for i, task := range config.Tasks {
