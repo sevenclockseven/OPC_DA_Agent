@@ -64,6 +64,8 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 	if section := cfg.Section("rtdb"); section != nil {
 		config.RtdbConfig = &RtdbConfig{}
 		config.RtdbConfig.Enabled, _ = section.Key("enabled").Bool()
+		config.RtdbConfig.Host = section.Key("host").String()
+		config.RtdbConfig.Port, _ = section.Key("port").Int()
 		config.RtdbConfig.Format = section.Key("format").String()
 	}
 
@@ -182,6 +184,8 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 	if config.RtdbConfig != nil {
 		section = cfg.Section("rtdb")
 		section.NewKey("enabled", fmt.Sprintf("%v", config.RtdbConfig.Enabled))
+		section.NewKey("host", config.RtdbConfig.Host)
+		section.NewKey("port", fmt.Sprintf("%d", config.RtdbConfig.Port))
 		section.NewKey("format", config.RtdbConfig.Format)
 	}
 
