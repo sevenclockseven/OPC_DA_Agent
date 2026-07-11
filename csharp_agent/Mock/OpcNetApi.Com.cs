@@ -1,5 +1,6 @@
 // OPC DA 通用 COM 接口定义
 // IEnumString - COM 标准枚举接口，OPC 浏览功能依赖此接口
+// IEnumGUID - COM GUID 枚举接口，OPC 服务器列表查询依赖此接口
 using System;
 using System.Runtime.InteropServices;
 
@@ -22,6 +23,30 @@ namespace OpcNetApi.Com
         void Skip([MarshalAs(UnmanagedType.I4)] int celt);
         void Reset();
         void Clone(out IEnumString ppEnum);
+    }
+
+    /// <summary>
+    /// COM GUID 枚举接口 - IOPCServerList.EnumClasses 返回此接口
+    /// </summary>
+    [ComImport]
+    [Guid("0002E000-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IEnumGUID
+    {
+        [PreserveSig]
+        int Next(
+            [MarshalAs(UnmanagedType.U4)] int celt,
+            [Out] out Guid rgelt,
+            [Out][MarshalAs(UnmanagedType.U4)] out int pceltFetched);
+
+        [PreserveSig]
+        int Skip([MarshalAs(UnmanagedType.U4)] int celt);
+
+        [PreserveSig]
+        int Reset();
+
+        [PreserveSig]
+        int Clone([Out] out IEnumGUID ppenum);
     }
 
     /// <summary>COM 错误码常量</summary>
