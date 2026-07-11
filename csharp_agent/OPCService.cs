@@ -243,6 +243,7 @@ namespace OPC_DA_Agent
 
                 OPCNAMESPACETYPE nsType;
                 browser.QueryOrganization(out nsType);
+                _logger.Info(string.Format("OPC命名空间类型: {0}", nsType));
 
                 browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
 
@@ -255,53 +256,88 @@ namespace OPC_DA_Agent
                     }
                 }
 
-                // 浏览分支（文件夹）
                 var branches = BrowseItems(browser, OPCBROWSETYPE.OPC_BRANCH);
-                foreach (string name in branches)
-                {
-                    string itemId = name;
-                    try
-                    {
-                        string fullId;
-                        browser.GetItemID(name, out fullId);
-                        itemId = fullId ?? name;
-                    }
-                    catch { }
+                _logger.Info(string.Format("分支节点数: {0}", branches.Count));
 
-                    result.Add(new OPCNode
+                if (branches.Count == 0)
+                {
+                    _logger.Info("OPC_BRANCH返回空，尝试OPC_FLAT");
+                    var flatItems = BrowseItems(browser, OPCBROWSETYPE.OPC_FLAT);
+                    _logger.Info(string.Format("OPC_FLAT返回: {0}项", flatItems.Count));
+
+                    foreach (string name in flatItems)
                     {
-                        NodeId = itemId,
-                        Name = name,
-                        Description = "分支",
-                        IsFolder = true,
-                        HasChildren = true,
-                        Children = new List<OPCNode>()
-                    });
+                        string itemId = name;
+                        try
+                        {
+                            string fullId;
+                            browser.GetItemID(name, out fullId);
+                            itemId = fullId ?? name;
+                        }
+                        catch { }
+
+                        result.Add(new OPCNode
+                        {
+                            NodeId = itemId,
+                            Name = name,
+                            Description = "标签",
+                            IsFolder = false,
+                            HasChildren = false,
+                            Children = null
+                        });
+                    }
+                }
+                else
+                {
+                    foreach (string name in branches)
+                    {
+                        string itemId = name;
+                        try
+                        {
+                            string fullId;
+                            browser.GetItemID(name, out fullId);
+                            itemId = fullId ?? name;
+                        }
+                        catch { }
+
+                        result.Add(new OPCNode
+                        {
+                            NodeId = itemId,
+                            Name = name,
+                            Description = "分支",
+                            IsFolder = true,
+                            HasChildren = true,
+                            Children = new List<OPCNode>()
+                        });
+                    }
+
+                    var leaves = BrowseItems(browser, OPCBROWSETYPE.OPC_LEAF);
+                    _logger.Info(string.Format("叶子节点数: {0}", leaves.Count));
+
+                    foreach (string name in leaves)
+                    {
+                        string itemId = name;
+                        try
+                        {
+                            string fullId;
+                            browser.GetItemID(name, out fullId);
+                            itemId = fullId ?? name;
+                        }
+                        catch { }
+
+                        result.Add(new OPCNode
+                        {
+                            NodeId = itemId,
+                            Name = name,
+                            Description = "标签",
+                            IsFolder = false,
+                            HasChildren = false,
+                            Children = null
+                        });
+                    }
                 }
 
-                // 浏览叶子（标签）
-                var leaves = BrowseItems(browser, OPCBROWSETYPE.OPC_LEAF);
-                foreach (string name in leaves)
-                {
-                    string itemId = name;
-                    try
-                    {
-                        string fullId;
-                        browser.GetItemID(name, out fullId);
-                        itemId = fullId ?? name;
-                    }
-                    catch { }
-
-                    result.Add(new OPCNode
-                    {
-                        NodeId = itemId,
-                        Name = name,
-                        Description = "标签",
-                        IsFolder = false,
-                        HasChildren = false,
-                        Children = null
-                    });
-                }
+                _logger.Info(string.Format("浏览完成，共返回{0}个节点", result.Count));
             }
             catch (Exception ex)
             {
