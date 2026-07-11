@@ -275,6 +275,54 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 			rawData = append(rawData, fetched...)
 		}
 	}
+
+	if len(rawData) == 0 {
+		return
+	}
+
+	values := make(map[string]interface{})
+	metadata := make(map[string]map[string]interface{})
+
+	for _, item := range rawData {
+		origKey, _ := item["topic"].(string)
+		val := item["value"]
+		quality, _ := item["quality"].(int)
+
+		newKey := tr.transformer.Transform(origKey)
+
+		if len(tr.task.Tags) > 0 {
+			for _, tag := range tr.task.Tags {
+				if tag.OpcTag == origKey {
+					newKey = tag.DbName
+					break
+				}
+			}
+		}
+
+		values[newKey] = val
+		metadata[newKey] = map[string]interface{}{
+			"quality":   quality,
+			"timestamp": time.Now().UnixMilli(),
+		}
+	}
+
+	msg := map[string]interface{}{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"values":    values,
+		"metadata":  metadata,
+	}
+
+	if collector.mqttClient != nil && collector.mqttClient.IsConnected() {
+		if err := collector.mqttClient.Publish(msg); err != nil {
+			log.Printf("MQTT发送失败: %v", err)
+		}
+	}
+
+	if collector.rtdbClient != nil && collector.rtdbClient.IsConnected() {
+		if err := collector.rtdbClient.Send(msg); err != nil {
+			log.Printf("RTDB发送失败: %v", err)
+		}
+	}
 }
 
 type RtdbClient struct {
