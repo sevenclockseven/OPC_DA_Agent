@@ -45,14 +45,11 @@
     <Reference Include="Newtonsoft.Json">
       <HintPath>packages\Newtonsoft.Json.13.0.3\lib\net40\Newtonsoft.Json.dll</HintPath>
     </Reference>
-    <!-- OPC Automation 接口 -->
-    <Reference Include="OPCDAAuto">
-      <HintPath>OPCDAAuto.dll</HintPath>
+    <!-- OPC Automation 互操作程序集（tlbimp 从 OPCDAuto.dll 生成） -->
+    <Reference Include="Interop.OPCAutomation">
+      <HintPath>Interop.OPCAutomation.dll</HintPath>
       <Private>true</Private>
     </Reference>
-    <Content Include="OPCDAAuto.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <!-- Main project files -->
     <Compile Include="Program.cs" />
     <Compile Include="Config.cs" />
