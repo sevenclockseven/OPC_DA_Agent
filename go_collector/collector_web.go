@@ -501,6 +501,14 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
                 </select>
             </div>
             <div class="form-group">
+                <label>RTDB服务器地址</label>
+                <input type="text" id="host" name="host" placeholder="例如: 192.168.1.100">
+            </div>
+            <div class="form-group">
+                <label>RTDB端口</label>
+                <input type="number" id="port" name="port" placeholder="例如: 9001">
+            </div>
+            <div class="form-group">
                 <label>输出格式</label>
                 <select id="format" name="format">
                     <option value="{key},{value},{quality},{timestamp}">CSV: key,value,quality,timestamp</option>
@@ -527,6 +535,8 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
             if (data.success && data.data.rtdb) {
                 const rtdb = data.data.rtdb;
                 document.getElementById('enabled').value = rtdb.enabled?.toString() || 'false';
+                document.getElementById('host').value = rtdb.host || '';
+                document.getElementById('port').value = rtdb.port || '';
                 const format = rtdb.format || '{key},{value},{quality},{timestamp}';
                 if (format === '{key},{value},{quality},{timestamp}') {
                     document.getElementById('format').value = '{key},{value},{quality},{timestamp}';
@@ -547,6 +557,8 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
 
             const rtdb = {
                 enabled: document.getElementById('enabled').value === 'true',
+                host: document.getElementById('host').value,
+                port: parseInt(document.getElementById('port').value) || 0,
                 format: format
             };
 
@@ -568,6 +580,8 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
 
             const rtdb = {
                 enabled: true,
+                host: document.getElementById('host').value,
+                port: parseInt(document.getElementById('port').value) || 0,
                 format: format
             };
 

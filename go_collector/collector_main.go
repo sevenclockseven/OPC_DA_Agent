@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -310,6 +311,7 @@ func (c *Collector) buildTagMapping() map[string]string {
 type RtdbClient struct {
 	config    *RtdbConfig
 	connected bool
+	conn      net.Conn
 }
 
 func NewRtdbClient(config *RtdbConfig) *RtdbClient {
@@ -319,12 +321,26 @@ func NewRtdbClient(config *RtdbConfig) *RtdbClient {
 }
 
 func (c *RtdbClient) Connect() error {
+	if c.config.Host == "" || c.config.Port == 0 {
+		return fmt.Errorf("RTDB地址或端口未配置")
+	}
+
+	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("连接RTDB失败: %v", err)
+	}
+
+	c.conn = conn
 	c.connected = true
-	log.Println("✅ RTDB客户端已初始化")
+	log.Printf("✅ RTDB已连接到 %s", addr)
 	return nil
 }
 
 func (c *RtdbClient) Disconnect() {
+	if c.conn != nil {
+		c.conn.Close()
+	}
 	c.connected = false
 	log.Println("📴 RTDB已断开")
 }
@@ -347,6 +363,10 @@ func (c *RtdbClient) Send(message map[string]interface{}) error {
 
 	for key, value := range values {
 		line := c.formatLine(key, value, metadata[key])
+		_, err := c.conn.Write([]byte(line + "\n"))
+		if err != nil {
+			return fmt.Errorf("发送数据失败: %v", err)
+		}
 		log.Printf("RTDB发送: %s", line)
 	}
 
@@ -360,12 +380,12 @@ func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]i
 	}
 
 	quality := 192
-	timestamp := ""
+	timestamp := time.Now().UnixMilli()
 	if meta != nil {
 		if q, ok := meta["quality"].(int); ok {
 			quality = q
 		}
-		if t, ok := meta["timestamp"].(string); ok {
+		if t, ok := meta["timestamp"].(int64); ok {
 			timestamp = t
 		}
 	}
@@ -374,7 +394,7 @@ func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]i
 	result = strings.ReplaceAll(result, "{key}", key)
 	result = strings.ReplaceAll(result, "{value}", fmt.Sprintf("%v", value))
 	result = strings.ReplaceAll(result, "{quality}", fmt.Sprintf("%d", quality))
-	result = strings.ReplaceAll(result, "{timestamp}", timestamp)
+	result = strings.ReplaceAll(result, "{timestamp}", fmt.Sprintf("%d", timestamp))
 
 	return result
 }
