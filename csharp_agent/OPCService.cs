@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
-using OPCAutomation;
+using Interop.OPCAutomation;
 
 namespace OPC_DA_Agent
 {
@@ -56,9 +56,6 @@ namespace OPC_DA_Agent
             _startTime = DateTime.Now;
         }
 
-        /// <summary>
-        /// 连接到 OPC DA 服务器
-        /// </summary>
         public bool Connect()
         {
             try
@@ -87,9 +84,6 @@ namespace OPC_DA_Agent
             }
         }
 
-        /// <summary>
-        /// 启动数据采集（使用配置中的标签列表）
-        /// </summary>
         public bool Start()
         {
             if (_opcServer == null || _opcServer.ServerState != 1)
@@ -100,8 +94,6 @@ namespace OPC_DA_Agent
 
             try
             {
-                int updateRate = _config.UpdateInterval;
-
                 OPCGroups groups = _opcServer.OPCGroups;
                 groups.DefaultGroupDeadband = 0;
                 groups.DefaultGroupIsActive = true;
@@ -109,7 +101,7 @@ namespace OPC_DA_Agent
                 _opcGroup = groups.Add("DataGroup");
                 _opcGroup.IsActive = true;
                 _opcGroup.IsSubscribed = true;
-                _opcGroup.UpdateRate = updateRate;
+                _opcGroup.UpdateRate = _config.UpdateInterval;
 
                 if (_tags.Count > 0)
                 {
@@ -129,9 +121,6 @@ namespace OPC_DA_Agent
             }
         }
 
-        /// <summary>
-        /// 应用标签配置：将 _tags 中的标签添加到 OPC Group
-        /// </summary>
         private void ApplyTags()
         {
             try
@@ -153,10 +142,12 @@ namespace OPC_DA_Agent
 
                 if (itemIds.Count > 0)
                 {
-                    Array serverHandles;
-                    Array errors;
+                    Array opcItems = itemIds.ToArray();
+                    Array handlesArray = clientHandles.ToArray();
+                    object serverHandles;
+                    object errors;
 
-                    _opcGroup.OPCItems.AddItems(itemIds.Count, itemIds.ToArray(), clientHandles.ToArray(), out serverHandles, out errors);
+                    _opcGroup.OPCItems.AddItems(itemIds.Count, opcItems, handlesArray, out serverHandles, out errors);
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
 
                     lock (_lock)
@@ -174,9 +165,6 @@ namespace OPC_DA_Agent
             }
         }
 
-        /// <summary>
-        /// 停止数据采集
-        /// </summary>
         public void Stop()
         {
             _isRunning = false;
@@ -188,9 +176,6 @@ namespace OPC_DA_Agent
             _logger.Info("OPC数据采集已停止");
         }
 
-        /// <summary>
-        /// 定时更新数据
-        /// </summary>
         private void OnUpdateTimer(object state)
         {
             if (!_isRunning || _opcGroup == null) return;
@@ -200,27 +185,31 @@ namespace OPC_DA_Agent
                 int count = _opcGroup.OPCItems.Count;
                 if (count == 0) return;
 
-                Array serverHandles = new object[count + 1];
+                object serverHandles = new object[count + 1];
+                object errors;
+
                 for (int i = 1; i <= count; i++)
                 {
-                    serverHandles.SetValue(i, i);
+                    ((Array)serverHandles).SetValue(i, i);
                 }
 
-                Array values;
+                object values;
                 object qualities;
                 object timestamps;
-                Array errors;
 
                 _opcGroup.SyncRead(2, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
 
                 lock (_lock)
                 {
-                    for (int i = 0; i < count; i++)
+                    if (values is Array valArray)
                     {
-                        if (i < _tags.Count)
+                        for (int i = 1; i <= count; i++)
                         {
-                            string tagId = _tags[i].NodeId;
-                            _lastValues[tagId] = values.GetValue(i + 1);
+                            if (i - 1 < _tags.Count)
+                            {
+                                string tagId = _tags[i - 1].NodeId;
+                                _lastValues[tagId] = valArray.GetValue(i);
+                            }
                         }
                     }
                 }
@@ -233,9 +222,6 @@ namespace OPC_DA_Agent
             }
         }
 
-        /// <summary>
-        /// 获取状态信息
-        /// </summary>
         public StatusInfo GetStatus()
         {
             return new StatusInfo
@@ -249,9 +235,6 @@ namespace OPC_DA_Agent
             };
         }
 
-        /// <summary>
-        /// 获取当前采集数据
-        /// </summary>
         public object GetData()
         {
             var result = new Dictionary<string, object>();
@@ -265,17 +248,11 @@ namespace OPC_DA_Agent
             return result;
         }
 
-        /// <summary>
-        /// 浏览 OPC 服务器根节点
-        /// </summary>
         public List<OPCNode> GetBrowseRoot()
         {
             return BrowsePath(null);
         }
 
-        /// <summary>
-        /// 浏览指定路径下的子节点
-        /// </summary>
         public List<OPCNode> BrowsePath(string nodeId)
         {
             if (_opcServer == null || _opcServer.ServerState != 1)
@@ -284,39 +261,25 @@ namespace OPC_DA_Agent
             var result = new List<OPCNode>();
             try
             {
-                Type serverType = _opcServer.GetType();
-                object browser = null;
+                dynamic browser = _opcServer.OPCBrowser;
 
-                foreach (var prop in serverType.GetProperties())
-                {
-                    if (prop.Name.Contains("Browse") || prop.Name.Contains("browser"))
-                    {
-                        browser = prop.GetValue(_opcServer, null);
-                        break;
-                    }
-                }
-
-                if (browser == null)
-                {
-                    _logger.Error("[Browse] 未找到浏览接口，当前OPC服务器可能不支持浏览");
-                    return result;
-                }
-
-                dynamic dynBrowser = browser;
-                dynBrowser.MoveToRoot();
+                browser.ShowBranches();
+                browser.MoveToRoot();
 
                 if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
                 {
                     string[] parts = nodeId.Split('.');
                     foreach (string part in parts)
                     {
-                        dynBrowser.MoveDown(part);
+                        browser.MoveDown(part);
                     }
                 }
 
-                dynBrowser.ShowBranches();
-                foreach (string branch in dynBrowser)
+                browser.ShowBranches();
+                IEnumerator branchEnum = ((IEnumerable)browser).GetEnumerator();
+                while (branchEnum.MoveNext())
                 {
+                    string branch = branchEnum.Current as string;
                     if (!string.IsNullOrEmpty(branch))
                     {
                         result.Add(new OPCNode
@@ -331,9 +294,11 @@ namespace OPC_DA_Agent
                     }
                 }
 
-                dynBrowser.ShowLeafs(true);
-                foreach (string leaf in dynBrowser)
+                browser.ShowLeafs(true);
+                IEnumerator leafEnum = ((IEnumerable)browser).GetEnumerator();
+                while (leafEnum.MoveNext())
                 {
+                    string leaf = leafEnum.Current as string;
                     if (!string.IsNullOrEmpty(leaf))
                     {
                         string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
@@ -357,9 +322,6 @@ namespace OPC_DA_Agent
             return result;
         }
 
-        /// <summary>
-        /// 更新标签列表（来自 Web UI 选择）
-        /// </summary>
         public void UpdateTags(List<TagConfig> newTags)
         {
             lock (_lock)
@@ -371,12 +333,12 @@ namespace OPC_DA_Agent
                         int count = _opcGroup.OPCItems.Count;
                         if (count > 0)
                         {
-                            Array handles = new object[count + 1];
+                            object handles = new object[count + 1];
                             for (int i = 1; i <= count; i++)
                             {
-                                handles.SetValue(i, i);
+                                ((Array)handles).SetValue(i, i);
                             }
-                            Array errors;
+                            object errors;
                             _opcGroup.OPCItems.Remove(count, ref handles, out errors);
                         }
                     }
@@ -404,9 +366,6 @@ namespace OPC_DA_Agent
             }
         }
 
-        /// <summary>
-        /// 获取当前标签列表
-        /// </summary>
         public List<TagConfig> GetTags()
         {
             return _tags;
