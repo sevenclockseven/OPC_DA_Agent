@@ -45,6 +45,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
 (function() {
   var selected = {};
   var base = window.location.origin;
+  var nodeCounter = 0;
 
   function api(path, method, data, cb) {
     var x = new XMLHttpRequest();
@@ -86,33 +87,36 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
       var folder = !!n.isFolder;
       nodeDiv.className = 'node ' + (folder ? 'branch' : 'leaf');
       nodeDiv.textContent = (folder ? '> ' : '# ') + n.name;
-      nodeDiv.onclick = (function(node, pId) {
-        return function() {
-          if (node.isFolder) {
-            var childrenDiv = document.getElementById('children-' + pId + '-' + node.nodeId);
-            if (!childrenDiv) return;
+
+      if (folder) {
+        var childId = 'nc' + (nodeCounter++);
+        var childrenDiv = document.createElement('div');
+        childrenDiv.id = childId;
+        childrenDiv.className = 'children';
+        div.appendChild(childrenDiv);
+
+        (function(node, cId) {
+          nodeDiv.onclick = function() {
             if (childrenDiv.classList.contains('open')) {
               childrenDiv.classList.remove('open');
             } else {
               if (!childrenDiv.dataset.loaded) {
-                loadChildren('children-' + pId + '-' + node.nodeId, node.nodeId);
+                loadChildren(cId, node.nodeId);
               }
               childrenDiv.classList.add('open');
             }
-          } else {
+          };
+        })(n, childId);
+      } else {
+        (function(node) {
+          nodeDiv.onclick = function() {
             toggleTag(node);
             nodeDiv.classList.toggle('selected');
-          }
-        };
-      })(n, parentId);
-      div.appendChild(nodeDiv);
-
-      if (folder) {
-        var childrenDiv = document.createElement('div');
-        childrenDiv.id = 'children-' + parentId + '-' + n.nodeId;
-        childrenDiv.className = 'children';
-        div.appendChild(childrenDiv);
+          };
+        })(n);
       }
+
+      div.appendChild(nodeDiv);
       parent.appendChild(div);
     });
   }
