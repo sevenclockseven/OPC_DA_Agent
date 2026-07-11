@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -42,13 +40,10 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/web/mqtt", ws.handleMqttPage).Methods("GET")
 	r.HandleFunc("/web/http", ws.handleHttpPage).Methods("GET")
 	r.HandleFunc("/web/transform", ws.handleTransformPage).Methods("GET")
-	r.HandleFunc("/web/import-export", ws.handleImportExportPage).Methods("GET")
 
 	// API接口
 	r.HandleFunc("/api/config", ws.handleGetConfig).Methods("GET")
 	r.HandleFunc("/api/config", ws.handleUpdateConfig).Methods("POST")
-	r.HandleFunc("/api/config/import", ws.handleImportConfig).Methods("POST")
-	r.HandleFunc("/api/config/export", ws.handleExportConfig).Methods("GET")
 	r.HandleFunc("/api/config/validate", ws.handleValidateConfig).Methods("POST")
 	r.HandleFunc("/api/mqtt/test", ws.handleMqttTest).Methods("POST")
 	r.HandleFunc("/api/http/test", ws.handleHttpTest).Methods("POST")
@@ -104,10 +99,6 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
             <a href="/web/transform" class="menu-item">
                 <h3>🔄 键名转换</h3>
                 <p>配置转换规则</p>
-            </a>
-            <a href="/web/import-export" class="menu-item">
-                <h3>📁 导入导出</h3>
-                <p>配置文件管理</p>
             </a>
         </div>
 
@@ -889,134 +880,10 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
 	ws.renderHTML(w, tmpl)
 }
 
-func (ws *WebServer) handleImportExportPage(w http.ResponseWriter, r *http.Request) {
-	tmpl := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>导入导出 - OPC DA Collector</title>
-    <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .form-group { margin-bottom: 15px; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .back { background: #666; }
-        .export { background: #2196F3; }
-        .convert { background: #FF9800; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-        input[type="file"] { margin: 10px 0; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📁 导入导出配置</h1>
-        <a href="/" class="back">← 返回首页</a>
-
-        <h3>导入配置文件</h3>
-        <div class="form-group">
-            <input type="file" id="configFile" accept=".ini,.json">
-            <button onclick="importConfig()">📤 上传并导入</button>
-        </div>
-
-        <h3>导出配置文件</h3>
-        <div class="form-group">
-            <button class="export" onclick="exportConfig('ini')">📥 导出为INI</button>
-            <button class="export" onclick="exportConfig('json')">📥 导出为JSON</button>
-        </div>
-
-        <h3>格式转换</h3>
-        <div class="form-group">
-            <button class="convert" onclick="convertIniToJson()">INI → JSON</button>
-            <button class="convert" onclick="convertJsonToIni()">JSON → INI</button>
-        </div>
-
-        <h3>配置模板</h3>
-        <div class="form-group">
-            <button onclick="loadTemplate('mqtt_basic')">MQTT基础模板</button>
-            <button onclick="loadTemplate('http_basic')">HTTP基础模板</button>
-            <button onclick="loadTemplate('full')">完整模板</button>
-        </div>
-
-        <div id="result" style="margin-top: 20px;"></div>
-    </div>
-
-    <script>
-        async function importConfig() {
-            const fileInput = document.getElementById('configFile');
-            if (!fileInput.files.length) {
-                showResult({ success: false, message: '请选择配置文件' });
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-
-            const response = await fetch('/api/config/import', {
-                method: 'POST',
-                body: formData
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        function exportConfig(format) {
-            window.location.href = '/api/config/export?format=' + format;
-        }
-
-        async function convertIniToJson() {
-            const response = await fetch('/api/config/convert?from=ini&to=json', {
-                method: 'POST'
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        async function convertJsonToIni() {
-            const response = await fetch('/api/config/convert?from=json&to=ini', {
-                method: 'POST'
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        async function loadTemplate(templateName) {
-            const response = await fetch('/api/config/template/' + templateName, {
-                method: 'POST'
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        function showResult(result) {
-            const div = document.getElementById('result');
-                if (result.success) {
-                div.innerHTML = '<div class="success">✓ ' + (result.message || '操作成功') + '</div>';
-            } else {
-                div.innerHTML = '<div class="error">✗ ' + (result.message || '操作失败') + '</div>';
-            }
-        }
-    </script>
-</body>
-</html>
-	`
-	ws.renderHTML(w, tmpl)
-}
-
-// renderHTML 将 HTML 字符串写入响应并设置 Content-Type
 func (ws *WebServer) renderHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	io.WriteString(w, html)
 }
-
-// API处理函数
 
 func (ws *WebServer) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	config := ws.configManager.Load(ws.configPath)
@@ -1059,81 +926,6 @@ func (ws *WebServer) handleUpdateConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ws.writeJSON(w, true, "配置已更新", nil)
-}
-
-func (ws *WebServer) handleImportConfig(w http.ResponseWriter, r *http.Request) {
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		ws.writeJSON(w, false, "无法读取文件", nil)
-		return
-	}
-	defer file.Close()
-
-	// 保存上传的文件
-	tmpPath := filepath.Join(os.TempDir(), header.Filename)
-	dst, err := os.Create(tmpPath)
-	if err != nil {
-		ws.writeJSON(w, false, "无法创建临时文件", nil)
-		return
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		ws.writeJSON(w, false, "复制文件失败", nil)
-		return
-	}
-
-	// 加载配置
-	var config *AppConfig
-	if strings.HasSuffix(header.Filename, ".ini") {
-		config = ws.configManager.LoadIni(tmpPath)
-	} else if strings.HasSuffix(header.Filename, ".json") {
-		config = ws.configManager.LoadJson(tmpPath)
-	} else {
-		ws.writeJSON(w, false, "不支持的文件格式", nil)
-		return
-	}
-
-	if config == nil {
-		ws.writeJSON(w, false, "配置加载失败", nil)
-		return
-	}
-
-	// 保存到配置路径
-	if err := ws.configManager.Save(ws.configPath, config); err != nil {
-		ws.writeJSON(w, false, fmt.Sprintf("保存配置失败: %v", err), nil)
-		return
-	}
-
-	ws.writeJSON(w, true, fmt.Sprintf("配置已导入: %s", header.Filename), nil)
-}
-
-func (ws *WebServer) handleExportConfig(w http.ResponseWriter, r *http.Request) {
-	format := r.URL.Query().Get("format")
-	if format == "" {
-		format = "json"
-	}
-
-	config := ws.configManager.Load(ws.configPath)
-	if config == nil {
-		ws.writeJSON(w, false, "无法加载配置", nil)
-		return
-	}
-
-	var filename string
-	var content string
-
-	if format == "ini" {
-		filename = "collector.ini"
-		content = ws.configManager.ToIniString(config)
-	} else {
-		filename = "collector.json"
-		content = ws.configManager.ToJsonString(config)
-	}
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
-	w.Write([]byte(content))
 }
 
 func (ws *WebServer) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
@@ -1340,35 +1132,15 @@ func (ws *WebServer) handleTransformDebug(w http.ResponseWriter, r *http.Request
 // 辅助函数
 
 func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]interface{}) error {
-	// 处理main配置
 	if mainData, ok := updates["main"].(map[string]interface{}); ok {
 		if title, ok := mainData["title"].(string); ok {
 			config.Title = title
 		}
-		if debug, ok := mainData["debug"].(bool); ok {
-			config.Debug = debug
-		}
-		if opcHost, ok := mainData["opc_host"].(string); ok {
-			config.OpcHost = opcHost
-		}
 		if opcServer, ok := mainData["opc_server"].(string); ok {
 			config.OpcServer = opcServer
 		}
-		if rtdbHost, ok := mainData["rtdb_host"].([]interface{}); ok {
-			config.RtdbHost = make([]string, len(rtdbHost))
-			for i, v := range rtdbHost {
-				config.RtdbHost[i] = v.(string)
-			}
-		}
-		if rtdbPort, ok := mainData["rtdb_port"].([]interface{}); ok {
-			config.RtdbPort = make([]int, len(rtdbPort))
-			for i, v := range rtdbPort {
-				config.RtdbPort[i] = int(v.(float64))
-			}
-		}
 	}
 
-	// 处理MQTT配置
 	if mqttData, ok := updates["mqtt"].(map[string]interface{}); ok {
 		if config.MqttConfig == nil {
 			config.MqttConfig = &MqttConfig{}
@@ -1416,50 +1188,21 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		if method, ok := httpData["method"].(string); ok {
 			config.HttpConfig.Method = method
 		}
-		if username, ok := httpData["username"].(string); ok {
-			config.HttpConfig.Username = username
-		}
-		if password, ok := httpData["password"].(string); ok {
-			config.HttpConfig.Password = password
-		}
 		if timeout, ok := httpData["timeout"].(float64); ok {
 			config.HttpConfig.Timeout = int(timeout)
 		}
-		if headers, ok := httpData["headers"].(map[string]interface{}); ok {
-			config.HttpConfig.Headers = make(map[string]string)
-			for k, v := range headers {
-				config.HttpConfig.Headers[k] = v.(string)
-			}
-		}
 	}
-
-	// 处理监控配置
-	// Monitor配置暂不支持
-	// if monitorData, ok := updates["monitor"].(map[string]interface{}); ok {
-	// 	if mode, ok := monitorData["mode"].(string); ok {
-	// 		config.MonitorMode = mode
-	// 	}
-	// 	if email, ok := monitorData["email"].(string); ok {
-	// 		config.MonitorEmail = email
-	// 	}
-	// 	if ip, ok := monitorData["ip"].(string); ok {
-	// 		config.MonitorIp = ip
-	// 	}
-	// }
 
 	return nil
 }
 
 func testMqttConnection(config *MqttConfig) error {
-	// 简化的MQTT连接测试
-	// 实际实现需要使用MQTT客户端库
 	if config.Broker == "" {
 		return fmt.Errorf("MQTT服务器地址不能为空")
 	}
 	if config.Port <= 0 || config.Port > 65535 {
 		return fmt.Errorf("MQTT端口无效")
 	}
-	// 这里可以添加实际的连接测试逻辑
 	return nil
 }
 
@@ -1472,16 +1215,6 @@ func testHttpConnection(config *HttpConfig) error {
 	req, err := http.NewRequest(config.Method, config.Url, nil)
 	if err != nil {
 		return err
-	}
-
-	// 添加认证
-	if config.Username != "" && config.Password != "" {
-		req.SetBasicAuth(config.Username, config.Password)
-	}
-
-	// 添加自定义头
-	for k, v := range config.Headers {
-		req.Header.Set(k, v)
 	}
 
 	resp, err := client.Do(req)
