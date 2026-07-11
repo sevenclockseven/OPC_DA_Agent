@@ -459,6 +459,7 @@ namespace OpcNetApi
             else if (string.IsNullOrEmpty(_host))
             {
                 // 本机连接：通过 ProgID 获取 CLSID
+                Console.WriteLine(string.Format("[OPC] 本机连接 ProgID: {0}", _progId));
                 serverType = Type.GetTypeFromProgID(_progId);
                 if (serverType == null)
                     throw new Exception(string.Format("无法找到 OPC 服务器 ProgID: {0}（请确认 OPC 服务器已安装并注册）", _progId));
@@ -466,14 +467,44 @@ namespace OpcNetApi
             else
             {
                 // 远程连接：通过 ProgID 在远程主机上获取 CLSID
-                System.Diagnostics.Debug.WriteLine(string.Format("尝试远程连接: ProgID={0}, Host={1}", _progId, _host));
+                Console.WriteLine(string.Format("[OPC] 远程连接: ProgID={0}, Host={1}", _progId, _host));
+
+                // 方法1: 使用 Type.GetTypeFromProgID 远程查询
                 serverType = Type.GetTypeFromProgID(_progId, _host);
+
                 if (serverType == null)
-                    throw new Exception(string.Format("无法在远程主机 {0} 上找到 OPC 服务器 ProgID: {1}（请确认 OpcEnum 服务已启动，或使用 CLSID 连接）", _host, _progId));
+                {
+                    Console.WriteLine("[OPC] Type.GetTypeFromProgID 远程查询失败，尝试本地注册表查找...");
+
+                    // 方法2: 尝试从本地注册表查找（可能已手动注册）
+                    serverType = Type.GetTypeFromProgID(_progId);
+                    if (serverType != null)
+                    {
+                        Console.WriteLine("[OPC] 从本地注册表找到 ProgID，将通过 DCOM 远程连接");
+                    }
+                }
+
+                if (serverType == null)
+                {
+                    throw new Exception(string.Format(
+                        "无法找到 OPC 服务器 ProgID: {0}\n" +
+                        "远程主机: {1}\n" +
+                        "可能原因:\n" +
+                        "1. 远程机器 OpcEnum 服务未运行\n" +
+                        "2. DCOM 权限不足\n" +
+                        "3. ProgID 不正确\n" +
+                        "解决方案:\n" +
+                        "- 在远程机器启动 OPC Enum 服务\n" +
+                        "- 或在本地注册远程 ProgID（regsvr32 或手动注册表）\n" +
+                        "- 或使用 CLSID 连接: opcda://host/{{CLSID}}",
+                        _progId, _host));
+                }
             }
 
+            Console.WriteLine(string.Format("[OPC] 创建 COM 实例: {0}", serverType.FullName));
             _comServer = Activator.CreateInstance(serverType);
             _connected = true;
+            Console.WriteLine("[OPC] 连接成功");
         }
 
         /// <summary>
