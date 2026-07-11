@@ -1,16 +1,16 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"regexp"
 	"strings"
 )
 
-// KeyTransformer 键名转换器
 type KeyTransformer struct {
 	rules []TransformRule
 }
 
-// TransformRule 转换规则
 type TransformRule struct {
 	RuleType    string `json:"rule_type"`
 	Pattern     string `json:"pattern"`
@@ -20,19 +20,38 @@ type TransformRule struct {
 	Description string `json:"description"`
 }
 
-// NewKeyTransformer 创建键名转换器
+type TransformConfig struct {
+	Enabled        bool           `json:"enabled"`
+	DefaultPrefix  string         `json:"default_prefix"`
+	DefaultSuffix  string         `json:"default_suffix"`
+	Rules          []TransformRule `json:"rules"`
+}
+
 func NewKeyTransformer() *KeyTransformer {
 	return &KeyTransformer{
 		rules: []TransformRule{},
 	}
 }
 
-// AddRule 添加转换规则
+func (kt *KeyTransformer) LoadFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var config TransformConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return err
+	}
+
+	kt.rules = config.Rules
+	return nil
+}
+
 func (kt *KeyTransformer) AddRule(rule TransformRule) {
 	kt.rules = append(kt.rules, rule)
 }
 
-// Transform 转换键名
 func (kt *KeyTransformer) Transform(originalKey string) string {
 	if originalKey == "" {
 		return originalKey
@@ -44,14 +63,12 @@ func (kt *KeyTransformer) Transform(originalKey string) string {
 		if !rule.Enabled {
 			continue
 		}
-
 		result = kt.applyRule(result, rule)
 	}
 
 	return result
 }
 
-// applyRule 应用单个规则
 func (kt *KeyTransformer) applyRule(key string, rule TransformRule) string {
 	switch rule.RuleType {
 	case "RemovePrefix":
@@ -100,42 +117,19 @@ func (kt *KeyTransformer) applyRule(key string, rule TransformRule) string {
 		}
 		return key
 
-	case "Format":
-		// 简单的格式化支持
-		return key
-
 	default:
 		return key
 	}
 }
 
-// TransformDictionary 批量转换字典
-func (kt *KeyTransformer) TransformDictionary(data map[string]interface{}) map[string]string {
-	result := make(map[string]string)
-
-	for key, value := range data {
-		transformedKey := kt.Transform(key)
-		if strValue, ok := value.(string); ok {
-			result[transformedKey] = strValue
-		} else {
-			result[transformedKey] = ""
-		}
-	}
-
-	return result
-}
-
-// ExportRules 导出规则
 func (kt *KeyTransformer) ExportRules() []TransformRule {
 	return append([]TransformRule{}, kt.rules...)
 }
 
-// ImportRules 导入规则
 func (kt *KeyTransformer) ImportRules(rules []TransformRule) {
 	kt.rules = append([]TransformRule{}, rules...)
 }
 
-// ClearRules 清空规则
 func (kt *KeyTransformer) ClearRules() {
 	kt.rules = []TransformRule{}
 }

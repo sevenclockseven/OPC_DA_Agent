@@ -139,9 +139,12 @@ type Collector struct {
 }
 
 func NewCollector(config *AppConfig) *Collector {
+	transformer := NewKeyTransformer()
+	transformer.LoadFromFile("transform.json")
+
 	return &Collector{
 		config:      config,
-		transformer: NewKeyTransformer(),
+		transformer: transformer,
 	}
 }
 
@@ -210,6 +213,8 @@ func (c *Collector) collectData() {
 		}
 	}
 
+	tagMapping := c.buildTagMapping()
+
 	keyValues := make(map[string]interface{})
 	metadata := make(map[string]map[string]interface{})
 
@@ -219,7 +224,12 @@ func (c *Collector) collectData() {
 			value := item["value"]
 			quality := item["quality"]
 
-			transformedKey := c.transformer.Transform(topic)
+			var transformedKey string
+			if dbName, ok := tagMapping[topic]; ok {
+				transformedKey = dbName
+			} else {
+				transformedKey = c.transformer.Transform(topic)
+			}
 
 			keyValues[transformedKey] = value
 			metadata[transformedKey] = map[string]interface{}{
@@ -229,7 +239,6 @@ func (c *Collector) collectData() {
 		}
 	}
 
-	// 发送到MQTT
 	if c.mqttClient != nil && c.mqttClient.IsConnected() {
 		message := map[string]interface{}{
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -239,7 +248,6 @@ func (c *Collector) collectData() {
 		c.mqttClient.Publish(message)
 	}
 
-	// 发送到HTTP
 	if c.httpClient != nil {
 		message := map[string]interface{}{
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -248,6 +256,23 @@ func (c *Collector) collectData() {
 		}
 		c.httpClient.Send(message)
 	}
+}
+
+func (c *Collector) buildTagMapping() map[string]string {
+	mapping := make(map[string]string)
+
+	for _, task := range c.config.Tasks {
+		if !task.Enabled {
+			continue
+		}
+		for _, tag := range task.Tags {
+			if tag.OpcTag != "" && tag.DbName != "" {
+				mapping[tag.OpcTag] = tag.DbName
+			}
+		}
+	}
+
+	return mapping
 }
 
 // MqttClient MQTT客户端
