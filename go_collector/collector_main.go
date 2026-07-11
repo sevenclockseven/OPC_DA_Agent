@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -305,18 +306,19 @@ func (c *MqttClient) Publish(message map[string]interface{}) error {
 		return fmt.Errorf("MQTT未连接")
 	}
 
-	// 转换为 JSON
-	jsonData := fmt.Sprintf("%v", message)
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("JSON序列化失败: %v", err)
+	}
 
-	// 发布消息
 	qos := byte(c.config.Qos)
-	token := c.client.Publish(c.config.Topic, qos, c.config.Retain, jsonData)
+	token := c.client.Publish(c.config.Topic, qos, c.config.Retain, string(jsonData))
 	if token.Wait() && token.Error() != nil {
-		log.Printf("❌ MQTT发布失败: %v", token.Error())
+		log.Printf("MQTT发布失败: %v", token.Error())
 		return token.Error()
 	}
 
-	log.Printf("📤 MQTT发布成功: %s", c.config.Topic)
+	log.Printf("MQTT发布成功: %s", c.config.Topic)
 	return nil
 }
 
@@ -340,7 +342,25 @@ func NewHttpClient(config *HttpConfig) *HttpClient {
 }
 
 func (c *HttpClient) Send(message map[string]interface{}) {
-	fmt.Printf("🌐 HTTP发送到 %s: %v\n", c.config.Url, message)
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("HTTP JSON序列化失败: %v", err)
+		return
+	}
+
+	client := &http.Client{
+		Timeout: time.Duration(c.config.Timeout) * time.Millisecond,
+	}
+
+	resp, err := client.Post(c.config.Url, "application/json", 
+		strings.NewReader(string(jsonData)))
+	if err != nil {
+		log.Printf("HTTP发送失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Printf("HTTP发送成功: %s (状态码: %d)", c.config.Url, resp.StatusCode)
 }
 
 func (c *Collector) fetchFromHttp() ([]map[string]interface{}, error) {
