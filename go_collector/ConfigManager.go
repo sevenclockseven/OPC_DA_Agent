@@ -38,12 +38,39 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.OpcServer = section.Key("opc_server").String()
 	}
 
-	if section := cfg.Section("http"); section != nil {
-		config.HttpConfig = &HttpConfig{}
-		config.HttpConfig.Enabled, _ = section.Key("enabled").Bool()
-		config.HttpConfig.Url = section.Key("url").String()
-		config.HttpConfig.Method = section.Key("method").String()
-		config.HttpConfig.Timeout, _ = section.Key("timeout").Int()
+	// 解析多个HTTP数据源配置 (http1, http2, ...)
+	config.HttpConfigs = make([]*HttpConfig, 0)
+	for i := 1; ; i++ {
+		sectionName := fmt.Sprintf("http%d", i)
+		section := cfg.Section(sectionName)
+		if section == nil || len(section.Keys()) == 0 {
+			break
+		}
+		httpConfig := &HttpConfig{}
+		httpConfig.Name = section.Key("name").String()
+		if httpConfig.Name == "" {
+			httpConfig.Name = fmt.Sprintf("数据源%d", i)
+		}
+		httpConfig.Enabled, _ = section.Key("enabled").Bool()
+		httpConfig.Url = section.Key("url").String()
+		httpConfig.Method = section.Key("method").String()
+		httpConfig.Timeout, _ = section.Key("timeout").Int()
+		config.HttpConfigs = append(config.HttpConfigs, httpConfig)
+	}
+
+	// 兼容旧的单个http配置
+	if len(config.HttpConfigs) == 0 {
+		if section := cfg.Section("http"); section != nil && len(section.Keys()) > 0 {
+			httpConfig := &HttpConfig{
+				Name:    "数据源1",
+				Enabled: true,
+			}
+			httpConfig.Enabled, _ = section.Key("enabled").Bool()
+			httpConfig.Url = section.Key("url").String()
+			httpConfig.Method = section.Key("method").String()
+			httpConfig.Timeout, _ = section.Key("timeout").Int()
+			config.HttpConfigs = append(config.HttpConfigs, httpConfig)
+		}
 	}
 
 	if section := cfg.Section("mqtt"); section != nil {
@@ -98,6 +125,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 
 		task := &TaskConfig{}
 		task.Enabled, _ = section.Key("task").Bool()
+		task.HttpSource = section.Key("http_source").String()
 		task.JobIntervalSecond, _ = section.Key("job_interval_second").Int()
 
 		for j := 1; ; j++ {
@@ -158,14 +186,6 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 	section.NewKey("title", config.Title)
 	section.NewKey("opc_server", config.OpcServer)
 
-	if config.HttpConfig != nil {
-		section = cfg.Section("http")
-		section.NewKey("enabled", fmt.Sprintf("%v", config.HttpConfig.Enabled))
-		section.NewKey("url", config.HttpConfig.Url)
-		section.NewKey("method", config.HttpConfig.Method)
-		section.NewKey("timeout", fmt.Sprintf("%d", config.HttpConfig.Timeout))
-	}
-
 	if config.MqttConfig != nil {
 		section = cfg.Section("mqtt")
 		section.NewKey("enabled", fmt.Sprintf("%v", config.MqttConfig.Enabled))
@@ -179,6 +199,16 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		section.NewKey("retain", fmt.Sprintf("%v", config.MqttConfig.Retain))
 		section.NewKey("format", config.MqttConfig.Format)
 		section.NewKey("js_transform", config.MqttConfig.JsTransform)
+	}
+
+	for i, httpConfig := range config.HttpConfigs {
+		sectionName := fmt.Sprintf("http%d", i+1)
+		section = cfg.Section(sectionName)
+		section.NewKey("name", httpConfig.Name)
+		section.NewKey("enabled", fmt.Sprintf("%v", httpConfig.Enabled))
+		section.NewKey("url", httpConfig.Url)
+		section.NewKey("method", httpConfig.Method)
+		section.NewKey("timeout", fmt.Sprintf("%d", httpConfig.Timeout))
 	}
 
 	if config.RtdbConfig != nil {
@@ -200,6 +230,7 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		sectionName := fmt.Sprintf("task%d", i+1)
 		section = cfg.Section(sectionName)
 		section.NewKey("task", fmt.Sprintf("%v", task.Enabled))
+		section.NewKey("http_source", task.HttpSource)
 		section.NewKey("job_interval_second", fmt.Sprintf("%d", task.JobIntervalSecond))
 
 		for j, tag := range task.Tags {
@@ -245,18 +276,21 @@ func (cm *ConfigManager) ToIniString(config *AppConfig) string {
 		section.NewKey("retain", fmt.Sprintf("%v", config.MqttConfig.Retain))
 	}
 
-	if config.HttpConfig != nil {
-		section = cfg.Section("http")
-		section.NewKey("enabled", fmt.Sprintf("%v", config.HttpConfig.Enabled))
-		section.NewKey("url", config.HttpConfig.Url)
-		section.NewKey("method", config.HttpConfig.Method)
-		section.NewKey("timeout", fmt.Sprintf("%d", config.HttpConfig.Timeout))
+	for i, httpConfig := range config.HttpConfigs {
+		sectionName := fmt.Sprintf("http%d", i+1)
+		section = cfg.Section(sectionName)
+		section.NewKey("name", httpConfig.Name)
+		section.NewKey("enabled", fmt.Sprintf("%v", httpConfig.Enabled))
+		section.NewKey("url", httpConfig.Url)
+		section.NewKey("method", httpConfig.Method)
+		section.NewKey("timeout", fmt.Sprintf("%d", httpConfig.Timeout))
 	}
 
 	for i, task := range config.Tasks {
 		sectionName := fmt.Sprintf("task%d", i+1)
 		section = cfg.Section(sectionName)
 		section.NewKey("task", fmt.Sprintf("%v", task.Enabled))
+		section.NewKey("http_source", task.HttpSource)
 		section.NewKey("job_interval_second", fmt.Sprintf("%d", task.JobIntervalSecond))
 
 		for j, tag := range task.Tags {
@@ -288,6 +322,7 @@ func (cm *ConfigManager) CreateTemplate(templateType string) *AppConfig {
 			Tasks: []*TaskConfig{
 				{
 					Enabled:           true,
+					HttpSource:        "",
 					JobIntervalSecond: 1,
 					Tags: []*TagMapping{
 						{OpcTag: "lt.sc.20251_M4102_ZZT", DbName: "20251_M4102_ZZT"},
@@ -300,15 +335,19 @@ func (cm *ConfigManager) CreateTemplate(templateType string) *AppConfig {
 		return &AppConfig{
 			Title:     "HTTP基础配置",
 			OpcServer: "KEPware.KEPServerEx.V4",
-			HttpConfig: &HttpConfig{
-				Enabled: true,
-				Url:     "http://172.16.32.98:8080/api/data",
-				Method:  "POST",
-				Timeout: 30000,
+			HttpConfigs: []*HttpConfig{
+				{
+					Name:    "数据源1",
+					Enabled: true,
+					Url:     "http://172.16.32.98:8080/api/data",
+					Method:  "POST",
+					Timeout: 30000,
+				},
 			},
 			Tasks: []*TaskConfig{
 				{
 					Enabled:           true,
+					HttpSource:        "数据源1",
 					JobIntervalSecond: 1,
 					Tags: []*TagMapping{
 						{OpcTag: "lt.sc.20251_M4102_ZZT", DbName: "20251_M4102_ZZT"},
@@ -330,15 +369,19 @@ func (cm *ConfigManager) CreateTemplate(templateType string) *AppConfig {
 				Qos:      1,
 				Retain:   false,
 			},
-			HttpConfig: &HttpConfig{
-				Enabled: false,
-				Url:     "http://172.16.32.98:8080/api/data",
-				Method:  "POST",
-				Timeout: 30000,
+			HttpConfigs: []*HttpConfig{
+				{
+					Name:    "数据源1",
+					Enabled: false,
+					Url:     "http://172.16.32.98:8080/api/data",
+					Method:  "POST",
+					Timeout: 30000,
+				},
 			},
 			Tasks: []*TaskConfig{
 				{
 					Enabled:           true,
+					HttpSource:        "数据源1",
 					JobIntervalSecond: 1,
 					Tags: []*TagMapping{
 						{OpcTag: "lt.sc.20251_M4102_ZZT", DbName: "20251_M4102_ZZT"},

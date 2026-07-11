@@ -1,16 +1,17 @@
 package main
 
 type AppConfig struct {
-	Title       string           `json:"title" ini:"title"`
-	OpcServer   string           `json:"opc_server" ini:"opc_server"`
-	HttpConfig  *HttpConfig      `json:"http,omitempty"`
-	MqttConfig  *MqttConfig      `json:"mqtt,omitempty"`
-	RtdbConfig  *RtdbConfig      `json:"rtdb,omitempty"`
-	WebhookConfig *WebhookConfig `json:"webhook,omitempty"`
-	Tasks       []*TaskConfig    `json:"tasks,omitempty"`
+	Title         string           `json:"title" ini:"title"`
+	OpcServer     string           `json:"opc_server" ini:"opc_server"`
+	HttpConfigs   []*HttpConfig    `json:"http_configs,omitempty"`
+	MqttConfig    *MqttConfig      `json:"mqtt,omitempty"`
+	RtdbConfig    *RtdbConfig      `json:"rtdb,omitempty"`
+	WebhookConfig *WebhookConfig   `json:"webhook,omitempty"`
+	Tasks         []*TaskConfig    `json:"tasks,omitempty"`
 }
 
 type HttpConfig struct {
+	Name    string `json:"name" ini:"name"`
 	Enabled bool   `json:"enabled" ini:"enabled"`
 	Url     string `json:"url" ini:"url"`
 	Method  string `json:"method" ini:"method"`
@@ -46,6 +47,7 @@ type WebhookConfig struct {
 
 type TaskConfig struct {
 	Enabled           bool          `json:"enabled" ini:"task"`
+	HttpSource        string        `json:"http_source" ini:"http_source"`
 	JobIntervalSecond int           `json:"job_interval_second" ini:"job_interval_second"`
 	Tags              []*TagMapping `json:"tags,omitempty"`
 }
