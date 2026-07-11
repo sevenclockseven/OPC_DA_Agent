@@ -158,6 +158,51 @@ namespace OpcNetApi
     #region COM 接口定义
 
     /// <summary>
+    /// IOPCServerList - 用于远程枚举 OPC 服务器（OPCEnum）
+    /// </summary>
+    [ComImport]
+    [GuidAttribute("13486D51-4821-11D2-A494-3CB306C10000")]
+    [InterfaceTypeAttribute(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IOPCServerList
+    {
+        [PreserveSig]
+        int EnumClasses(
+            [MarshalAs(UnmanagedType.U4)] int dwReserved,
+            [Out] out OpcNetApi.Com.IEnumGUID ppClsidEnumerator);
+
+        [PreserveSig]
+        int GetClassDetails(
+            ref Guid clsid,
+            [Out][MarshalAs(UnmanagedType.LPWStr)] out string ppszProgID,
+            [Out][MarshalAs(UnmanagedType.LPWStr)] out string ppszUserType,
+            [Out][MarshalAs(UnmanagedType.LPWStr)] out string ppszVerIndProgID);
+    }
+
+    /// <summary>
+    /// IEnumGUID - 枚举 GUID
+    /// </summary>
+    [ComImport]
+    [GuidAttribute("0002E000-0000-0000-C000-000000000046")]
+    [InterfaceTypeAttribute(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IEnumGUID
+    {
+        [PreserveSig]
+        int Next(
+            [MarshalAs(UnmanagedType.U4)] int celt,
+            [Out] out Guid rgelt,
+            [Out][MarshalAs(UnmanagedType.U4)] out int pceltFetched);
+
+        [PreserveSig]
+        int Skip([MarshalAs(UnmanagedType.U4)] int celt);
+
+        [PreserveSig]
+        int Reset();
+
+        [PreserveSig]
+        int Clone([Out] out OpcNetApi.Com.IEnumGUID ppenum);
+    }
+
+    /// <summary>
     /// IOPCServer - OPC DA 服务器主接口
     /// </summary>
     [ComImport]
@@ -466,17 +511,33 @@ namespace OpcNetApi
             }
             else
             {
-                // 远程连接：通过 ProgID 在远程主机上获取 CLSID
+                // 远程连接
                 Console.WriteLine(string.Format("[OPC] 远程连接: ProgID={0}, Host={1}", _progId, _host));
 
-                // 方法1: 使用 Type.GetTypeFromProgID 远程查询
-                serverType = Type.GetTypeFromProgID(_progId, _host);
+                // 方法1: 使用 IOPCServerList 远程查询 CLSID（OPC Client 使用的方式）
+                Console.WriteLine("[OPC] 尝试通过 IOPCServerList 远程查询 CLSID...");
+                Guid remoteClsid = QueryRemoteClsidViaOpcEnum(_progId, _host);
+                if (remoteClsid != Guid.Empty)
+                {
+                    Console.WriteLine(string.Format("[OPC] 远程查询到 CLSID: {0}", remoteClsid));
+                    serverType = Type.GetTypeFromCLSID(remoteClsid, _host);
+                    if (serverType != null)
+                    {
+                        Console.WriteLine("[OPC] 通过远程 CLSID 获取 Type 成功");
+                    }
+                }
 
+                // 方法2: 使用 Type.GetTypeFromProgID 远程查询
                 if (serverType == null)
                 {
-                    Console.WriteLine("[OPC] Type.GetTypeFromProgID 远程查询失败，尝试本地注册表查找...");
+                    Console.WriteLine("[OPC] 尝试 Type.GetTypeFromProgID 远程查询...");
+                    serverType = Type.GetTypeFromProgID(_progId, _host);
+                }
 
-                    // 方法2: 尝试从本地注册表查找（可能已手动注册）
+                // 方法3: 尝试从本地注册表查找（可能已手动注册）
+                if (serverType == null)
+                {
+                    Console.WriteLine("[OPC] 尝试本地注册表查找...");
                     serverType = Type.GetTypeFromProgID(_progId);
                     if (serverType != null)
                     {
@@ -489,13 +550,11 @@ namespace OpcNetApi
                     throw new Exception(string.Format(
                         "无法找到 OPC 服务器 ProgID: {0}\n" +
                         "远程主机: {1}\n" +
-                        "可能原因:\n" +
-                        "1. 远程机器 OpcEnum 服务未运行\n" +
-                        "2. DCOM 权限不足\n" +
-                        "3. ProgID 不正确\n" +
+                        "已尝试: IOPCServerList查询、Type.GetTypeFromProgID远程查询、本地注册表查找\n" +
                         "解决方案:\n" +
-                        "- 在远程机器启动 OPC Enum 服务\n" +
-                        "- 或在本地注册远程 ProgID（regsvr32 或手动注册表）\n" +
+                        "- 确认远程机器 OPC Enum 服务正在运行\n" +
+                        "- 确认 DCOM 权限配置正确\n" +
+                        "- 在本地注册远程 ProgID（从能连接的机器导出注册表）\n" +
                         "- 或使用 CLSID 连接: opcda://host/{{CLSID}}",
                         _progId, _host));
                 }
@@ -505,6 +564,67 @@ namespace OpcNetApi
             _comServer = Activator.CreateInstance(serverType);
             _connected = true;
             Console.WriteLine("[OPC] 连接成功");
+        }
+
+        /// <summary>
+        /// 通过 IOPCServerList 远程查询 ProgID 对应的 CLSID
+        /// </summary>
+        private Guid QueryRemoteClsidViaOpcEnum(string progId, string host)
+        {
+            object opcEnum = null;
+            try
+            {
+                // IOPCServerList 的 CLSID: {13486D51-4821-11D2-A494-3CB306C10000}
+                Guid clsidOpcEnum = new Guid("13486D51-4821-11D2-A494-3CB306C10000");
+                Type opcEnumType = Type.GetTypeFromCLSID(clsidOpcEnum, host);
+                if (opcEnumType == null)
+                {
+                    Console.WriteLine("[OPC] 无法获取 OpcEnum 类型");
+                    return Guid.Empty;
+                }
+
+                opcEnum = Activator.CreateInstance(opcEnumType);
+                IOPCServerList serverList = (IOPCServerList)opcEnum;
+
+                // 枚举所有 OPC 服务器，查找匹配的 ProgID
+                OpcNetApi.Com.IEnumGUID enumGuid;
+                int hr = serverList.EnumClasses(0, out enumGuid);
+                if (hr != 0 || enumGuid == null)
+                {
+                    Console.WriteLine(string.Format("[OPC] EnumClasses 失败: hr={0}", hr));
+                    return Guid.Empty;
+                }
+
+                Guid currentClsid;
+                int fetched;
+                while (true)
+                {
+                    hr = enumGuid.Next(1, out currentClsid, out fetched);
+                    if (hr != 0 || fetched == 0) break;
+
+                    string serverProgId, userType, verIndProgId;
+                    hr = serverList.GetClassDetails(ref currentClsid, out serverProgId, out userType, out verIndProgId);
+                    if (hr == 0)
+                    {
+                        Console.WriteLine(string.Format("[OPC] 发现服务器: ProgID={0}, CLSID={1}", serverProgId, currentClsid));
+                        if (string.Equals(serverProgId, progId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return currentClsid;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(string.Format("[OPC] IOPCServerList 查询异常: {0}", ex.Message));
+            }
+            finally
+            {
+                if (opcEnum != null && Marshal.IsComObject(opcEnum))
+                    Marshal.ReleaseComObject(opcEnum);
+            }
+
+            return Guid.Empty;
         }
 
         /// <summary>
