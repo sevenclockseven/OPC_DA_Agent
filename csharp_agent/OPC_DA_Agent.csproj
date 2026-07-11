@@ -48,7 +48,11 @@
     <!-- OPC Automation 接口 -->
     <Reference Include="OPCDAAuto">
       <HintPath>OPCDAAuto.dll</HintPath>
+      <Private>true</Private>
     </Reference>
+    <Content Include="OPCDAAuto.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <!-- Main project files -->
     <Compile Include="Program.cs" />
     <Compile Include="Config.cs" />
