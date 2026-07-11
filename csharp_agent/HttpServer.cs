@@ -20,6 +20,8 @@ namespace OPC_DA_Agent
 
         private long _requestCount = 0;
 
+        private HttpListener _listener;
+
         public HttpServer(Config config, OPCService opcService, Logger logger)
         {
             if (config == null) throw new ArgumentNullException("config");
@@ -29,12 +31,14 @@ namespace OPC_DA_Agent
             _config = config;
             _opcService = opcService;
             _logger = logger;
-
-            _listener = new HttpListener();
-            string bind = string.IsNullOrEmpty(config.HttpBindIp) ? "localhost" : config.HttpBindIp;
-            if (bind == "0.0.0.0") bind = "+";
-            _listener.Prefixes.Add(string.Format("http://{0}:{1}/", bind, config.HttpPort));
             _cts = new CancellationTokenSource();
+        }
+
+        private HttpListener TryCreateListener(string bind, int port)
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add(string.Format("http://{0}:{1}/", bind, port));
+            return listener;
         }
 
         public bool Start()
@@ -45,35 +49,42 @@ namespace OPC_DA_Agent
                 return true;
             }
 
-            try
+            string bind = string.IsNullOrEmpty(_config.HttpBindIp) ? "localhost" : _config.HttpBindIp;
+            if (bind == "0.0.0.0" || bind == "+") bind = "+";
+
+            var tries = new System.Collections.Generic.List<string>();
+            if (bind == "+")
             {
-                _listener.Start();
-                _isRunning = true;
-                _logger.Info(string.Format("HTTP服务器已启动，监听端口: {0}", _config.HttpPort));
-                _listener.BeginGetContext(OnGetContext, null);
-                return true;
+                tries.Add("+");
+                tries.Add("localhost");
             }
-            catch (Exception ex)
+            else
             {
-                _logger.Error("HTTP服务器启动失败", ex);
-                _logger.Info("尝试使用 localhost 绑定...");
+                tries.Add(bind);
+                tries.Add("localhost");
+            }
+
+            foreach (string host in tries)
+            {
                 try
                 {
-                    _listener.Stop();
-                    _listener.Prefixes.Clear();
-                    _listener.Prefixes.Add(string.Format("http://localhost:{0}/", _config.HttpPort));
+                    _listener = TryCreateListener(host, _config.HttpPort);
                     _listener.Start();
                     _isRunning = true;
-                    _logger.Info(string.Format("HTTP服务器已启动（localhost），端口: {0}", _config.HttpPort));
+                    _logger.Info(string.Format("HTTP服务器已启动: http://{0}:{1}/", host, _config.HttpPort));
                     _listener.BeginGetContext(OnGetContext, null);
                     return true;
                 }
-                catch (Exception ex2)
+                catch (Exception ex)
                 {
-                    _logger.Error("HTTP服务器启动失败（localhost回退）", ex2);
-                    return false;
+                    _logger.Error(string.Format("绑定 {0}:{1} 失败", host, _config.HttpPort), ex);
+                    try { if (_listener != null) _listener.Close(); } catch { }
+                    _listener = null;
                 }
             }
+
+            _logger.Error("HTTP服务器启动失败（所有绑定方式均失败），请尝试以管理员权限运行");
+            return false;
         }
 
         public void Stop()
@@ -81,7 +92,10 @@ namespace OPC_DA_Agent
             if (!_isRunning) return;
             _isRunning = false;
             _cts.Cancel();
-            _listener.Stop();
+            if (_listener != null)
+            {
+                try { _listener.Stop(); } catch { }
+            }
             _logger.Info("HTTP服务器已停止");
         }
 
@@ -103,7 +117,7 @@ namespace OPC_DA_Agent
             }
             finally
             {
-                if (_isRunning && _listener.IsListening)
+                if (_isRunning && _listener != null && _listener.IsListening)
                 {
                     try { _listener.BeginGetContext(OnGetContext, null); }
                     catch (ObjectDisposedException) { }
