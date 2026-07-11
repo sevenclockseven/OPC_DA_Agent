@@ -258,7 +258,8 @@ namespace OPC_DA_Agent
                 }
 
                 OpcNetApi.Com.IEnumString enumBranches;
-                browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_BRANCH, "", 0, 0, out enumBranches);
+                int hrBranch = browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_BRANCH, "", 0, 0, out enumBranches);
+                _logger.Info(string.Format("[Browse] BrowseOPCItemIDs(BRANCH) hr={0}, enum={1}", hrBranch, enumBranches != null ? "ok" : "null"));
                 int branchCount = 0;
                 if (enumBranches != null)
                 {
@@ -296,7 +297,8 @@ namespace OPC_DA_Agent
                 _logger.Info(string.Format("[Browse] 分支节点: {0}", branchCount));
 
                 OpcNetApi.Com.IEnumString enumLeaves;
-                browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_LEAF, "", 0, 0, out enumLeaves);
+                int hrLeaf = browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_LEAF, "", 0, 0, out enumLeaves);
+                _logger.Info(string.Format("[Browse] BrowseOPCItemIDs(LEAF) hr={0}, enum={1}", hrLeaf, enumLeaves != null ? "ok" : "null"));
                 int leafCount = 0;
                 if (enumLeaves != null)
                 {

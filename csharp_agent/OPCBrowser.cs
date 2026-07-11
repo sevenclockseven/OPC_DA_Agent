@@ -94,14 +94,13 @@ namespace OPC_DA_Agent
             var result = new List<OPCNode>();
 
             OpcNetApi.Com.IEnumString enumStr;
-            browser.BrowseOPCItemIDs(type, "", 0, 0, out enumStr);
+            int hr = browser.BrowseOPCItemIDs(type, "", 0, 0, out enumStr);
 
             if (enumStr == null) return result;
 
             const int batch = 100;
             string[] buf = new string[batch];
             int fetched;
-            int hr;
 
             do
             {
