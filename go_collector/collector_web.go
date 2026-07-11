@@ -42,6 +42,7 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/web/mqtt", ws.handleMqttPage).Methods("GET")
 	r.HandleFunc("/web/rtdb", ws.handleRtdbPage).Methods("GET")
 	r.HandleFunc("/web/transform", ws.handleTransformPage).Methods("GET")
+	r.HandleFunc("/web/tasks", ws.handleTasksPage).Methods("GET")
 
 	// API接口
 	r.HandleFunc("/api/config", ws.handleGetConfig).Methods("GET")
@@ -91,6 +92,10 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
             <a href="/web/http" class="menu-item">
                 <h3>🌐 数据源</h3>
                 <p>配置HTTP数据源</p>
+            </a>
+            <a href="/web/tasks" class="menu-item">
+                <h3>📋 采集任务</h3>
+                <p>配置采集任务</p>
             </a>
             <a href="/web/mqtt" class="menu-item">
                 <h3>📡 MQTT输出</h3>
@@ -620,12 +625,22 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         .preview { background: #e3f2fd; padding: 15px; border-radius: 6px; margin-top: 20px; }
         .rule-buttons { display: inline-block; margin-left: 10px; }
         .rule-buttons button { padding: 4px 8px; margin-right: 5px; font-size: 12px; }
+        .source-selector { background: #fff3e0; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #ff9800; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🔄 键名转换规则</h1>
         <a href="/" class="back">← 返回首页</a>
+
+        <div class="source-selector">
+            <div class="form-group">
+                <label>选择数据源</label>
+                <select id="source_selector" onchange="onSourceChange()">
+                    <option value="">默认（所有数据源共用）</option>
+                </select>
+            </div>
+        </div>
 
         <div class="form-group">
             <label>启用转换</label>
@@ -681,9 +696,33 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
 
     <script>
         let rules = [];
+        let currentSource = '';
+
+        async function loadSources() {
+            const response = await fetch('/api/config');
+            const data = await response.json();
+            if (data.success && data.data.http_configs) {
+                const select = document.getElementById('source_selector');
+                data.data.http_configs.forEach(config => {
+                    const option = document.createElement('option');
+                    option.value = config.name;
+                    option.textContent = config.name;
+                    select.appendChild(option);
+                });
+            }
+        }
+
+        function onSourceChange() {
+            currentSource = document.getElementById('source_selector').value;
+            loadRules();
+        }
 
         async function loadRules() {
-            const response = await fetch('/api/transform/rules');
+            let url = '/api/transform/rules';
+            if (currentSource) {
+                url += '?source=' + encodeURIComponent(currentSource);
+            }
+            const response = await fetch(url);
             const data = await response.json();
             if (data.success) {
                 rules = data.data.rules || [];
@@ -783,7 +822,6 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
             rules.push(rule);
             renderRules();
 
-            // 清空表单
             document.getElementById('pattern').value = '';
             document.getElementById('replacement').value = '';
             document.getElementById('description').value = '';
@@ -795,7 +833,7 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         }
 
         async function previewTransform() {
-            const testKeys = prompt("请输入测试键名（多个用逗号分隔）:\n例如: lt.sc.20251_M4102_ZZT,lt.sc.20251_M4102_CYBJ");
+            const testKeys = prompt("请输入测试键名（多个用逗号分隔）:\\n例如: lt.sc.20251_M4102_ZZT,lt.sc.20251_M4102_CYBJ");
             if (!testKeys) return;
 
             const keys = testKeys.split(',').map(k => k.trim());
@@ -828,6 +866,7 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
 
         async function saveRules() {
             const config = {
+                source: currentSource,
                 enabled: document.getElementById('enabled').value === 'true',
                 rules: rules
             };
@@ -851,6 +890,7 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
             }
         }
 
+        loadSources();
         loadRules();
     </script>
 </body>
@@ -1193,7 +1233,13 @@ func (ws *WebServer) handleTransformPreview(w http.ResponseWriter, r *http.Reque
 }
 
 func (ws *WebServer) handleGetTransformRules(w http.ResponseWriter, r *http.Request) {
-	data, err := os.ReadFile("transform.json")
+	source := r.URL.Query().Get("source")
+	fileName := "transform.json"
+	if source != "" {
+		fileName = "transform_" + source + ".json"
+	}
+
+	data, err := os.ReadFile(fileName)
 	if err != nil {
 		ws.writeJSON(w, false, "读取规则文件失败: "+err.Error(), nil)
 		return
@@ -1215,19 +1261,27 @@ func (ws *WebServer) handleUpdateTransformRules(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var config map[string]interface{}
-	if err := json.Unmarshal(body, &config); err != nil {
+	var requestData map[string]interface{}
+	if err := json.Unmarshal(body, &requestData); err != nil {
 		ws.writeJSON(w, false, "JSON解析失败", nil)
 		return
 	}
 
-	data, err := json.MarshalIndent(config, "", "  ")
+	source, _ := requestData["source"].(string)
+	fileName := "transform.json"
+	if source != "" {
+		fileName = "transform_" + source + ".json"
+	}
+
+	delete(requestData, "source")
+
+	data, err := json.MarshalIndent(requestData, "", "  ")
 	if err != nil {
 		ws.writeJSON(w, false, "序列化失败", nil)
 		return
 	}
 
-	if err := os.WriteFile("transform.json", data, 0644); err != nil {
+	if err := os.WriteFile(fileName, data, 0644); err != nil {
 		ws.writeJSON(w, false, "保存规则文件失败: "+err.Error(), nil)
 		return
 	}
@@ -1403,6 +1457,39 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 	}
 
+	if tasksData, ok := updates["tasks"].([]interface{}); ok {
+		config.Tasks = make([]*TaskConfig, 0)
+		for _, item := range tasksData {
+			if taskData, ok := item.(map[string]interface{}); ok {
+				task := &TaskConfig{}
+				if enabled, ok := taskData["enabled"].(bool); ok {
+					task.Enabled = enabled
+				}
+				if httpSource, ok := taskData["http_source"].(string); ok {
+					task.HttpSource = httpSource
+				}
+				if interval, ok := taskData["job_interval_second"].(float64); ok {
+					task.JobIntervalSecond = int(interval)
+				}
+				if tagsData, ok := taskData["tags"].([]interface{}); ok {
+					for _, tagItem := range tagsData {
+						if tagData, ok := tagItem.(map[string]interface{}); ok {
+							tag := &TagMapping{}
+							if opcTag, ok := tagData["opc_tag"].(string); ok {
+								tag.OpcTag = opcTag
+							}
+							if dbName, ok := tagData["db_name"].(string); ok {
+								tag.DbName = dbName
+							}
+							task.Tags = append(task.Tags, tag)
+						}
+					}
+				}
+				config.Tasks = append(config.Tasks, task)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -1482,6 +1569,242 @@ func (ws *WebServer) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		ws.writeJSON(w, false, fmt.Sprintf("Webhook返回状态码: %d", resp.StatusCode), nil)
 	}
+}
+
+func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>采集任务配置 - OPC DA Collector</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; }
+        .task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 20px; }
+        .task-card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 15px; position: relative; }
+        .task-card.disabled { opacity: 0.6; }
+        .task-name { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px; }
+        .task-info { color: #666; font-size: 14px; line-height: 1.6; }
+        .task-actions { margin-top: 10px; display: flex; gap: 8px; }
+        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-edit { background: #2196F3; color: white; }
+        .btn:hover { opacity: 0.85; }
+        .add-task { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-top: 15px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: white; }
+        .badge-on { background: #4CAF50; }
+        .badge-off { background: #999; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back">← 返回首页</a>
+        <h1>📋 采集任务配置</h1>
+        <p>配置采集任务，绑定数据源</p>
+        <div id="result"></div>
+
+        <div class="task-grid" id="taskGrid"></div>
+
+        <button class="add-task" onclick="openModal()">+ 添加任务</button>
+
+        <!-- 添加/编辑弹窗 -->
+        <div class="modal" id="taskModal">
+            <div class="modal-content">
+                <h2 id="modalTitle">添加任务</h2>
+                <div class="form-group">
+                    <label>启用</label>
+                    <select id="taskEnabled">
+                        <option value="true">启用</option>
+                        <option value="false">禁用</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>采集间隔(秒)</label>
+                    <input type="number" id="taskInterval" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>绑定数据源</label>
+                    <select id="taskSource"></select>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" onclick="closeModal()" style="background:#666;color:white;">取消</button>
+                    <button class="btn btn-primary" onclick="saveTask()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let tasks = [];
+        let httpConfigs = [];
+        let editingTask = '';
+
+        async function loadData() {
+            try {
+                const resp = await fetch('/api/config');
+                const data = await resp.json();
+                if (data.success) {
+                    tasks = data.data.tasks || [];
+                    httpConfigs = data.data.http_configs || [];
+                    renderTasks();
+                }
+            } catch (e) {
+                showResult(false, '加载配置失败: ' + e.message);
+            }
+        }
+
+        function renderTasks() {
+            const grid = document.getElementById('taskGrid');
+            if (tasks.length === 0) {
+                grid.innerHTML = '<div style="color:#999;padding:20px;">暂无任务，请点击下方按钮添加</div>';
+                return;
+            }
+
+            grid.innerHTML = '';
+            tasks.forEach((task, index) => {
+                const enabled = task.enabled;
+                const source = task.http_source || '数据源1';
+                const interval = task.job_interval_second || 1;
+                const card = document.createElement('div');
+                card.className = 'task-card' + (enabled ? '' : ' disabled');
+                card.innerHTML =
+                    '<div class="task-name">任务' + (index + 1) + ' <span class="badge ' + (enabled ? 'badge-on' : 'badge-off') + '">' + (enabled ? '启用' : '禁用') + '</span></div>' +
+                    '<div class="task-info">' +
+                    '数据源: ' + source + '<br>' +
+                    '采集间隔: ' + interval + '秒<br>' +
+                    '标签数: ' + (task.tags ? task.tags.length : 0) + '<br>' +
+                    '</div>' +
+                    '<div class="task-actions">' +
+                    '<button class="btn btn-edit" onclick="editTask(' + index + ')">编辑</button>' +
+                    '<button class="btn btn-danger" onclick="deleteTask(' + index + ')">删除</button>' +
+                    '</div>';
+                grid.appendChild(card);
+            });
+        }
+
+        function openModal(taskIndex) {
+            editingTask = taskIndex !== undefined ? taskIndex : -1;
+            document.getElementById('modalTitle').textContent = taskIndex !== undefined ? '编辑任务' : '添加任务';
+
+            // 填充数据源下拉
+            const select = document.getElementById('taskSource');
+            select.innerHTML = '';
+            httpConfigs.forEach(config => {
+                const opt = document.createElement('option');
+                opt.value = config.name || config.url;
+                opt.textContent = config.name || config.url;
+                select.appendChild(opt);
+            });
+
+            if (taskIndex !== undefined && tasks[taskIndex]) {
+                const task = tasks[taskIndex];
+                document.getElementById('taskEnabled').value = task.enabled ? 'true' : 'false';
+                document.getElementById('taskInterval').value = task.job_interval_second || 1;
+                select.value = task.http_source || (httpConfigs[0] ? (httpConfigs[0].name || httpConfigs[0].url) : '');
+            } else {
+                document.getElementById('taskEnabled').value = 'true';
+                document.getElementById('taskInterval').value = 1;
+            }
+
+            document.getElementById('taskModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('taskModal').style.display = 'none';
+            editingTask = -1;
+        }
+
+        async function saveTask() {
+            const enabled = document.getElementById('taskEnabled').value === 'true';
+            const interval = parseInt(document.getElementById('taskInterval').value) || 1;
+            const source = document.getElementById('taskSource').value;
+
+            const task = {
+                enabled: enabled,
+                http_source: source,
+                job_interval_second: interval,
+                tags: []
+            };
+
+            if (editingTask >= 0) {
+                task.tags = tasks[editingTask].tags || [];
+                tasks[editingTask] = task;
+            } else {
+                tasks.push(task);
+            }
+
+            try {
+                const resp = await fetch('/api/config');
+                const fullConfig = await resp.json();
+                if (fullConfig.success) {
+                    fullConfig.data.tasks = tasks;
+                    const saveResp = await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(fullConfig.data)
+                    });
+                    const result = await saveResp.json();
+                    showResult(result.success, result.message);
+                    if (result.success) {
+                        closeModal();
+                        loadData();
+                    }
+                }
+            } catch (e) {
+                showResult(false, '保存失败: ' + e.message);
+            }
+        }
+
+        function editTask(index) {
+            openModal(index);
+        }
+
+        async function deleteTask(index) {
+            if (!confirm('确认删除此任务？')) return;
+            tasks.splice(index, 1);
+
+            try {
+                const resp = await fetch('/api/config');
+                const fullConfig = await resp.json();
+                if (fullConfig.success) {
+                    fullConfig.data.tasks = tasks;
+                    const saveResp = await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(fullConfig.data)
+                    });
+                    const result = await saveResp.json();
+                    showResult(result.success, result.message);
+                    if (result.success) loadData();
+                }
+            } catch (e) {
+                showResult(false, '删除失败: ' + e.message);
+            }
+        }
+
+        function showResult(success, message) {
+            const div = document.getElementById('result');
+            div.innerHTML = '<div class="' + (success ? 'success' : 'error') + '">' + (success ? '✓ ' : '✗ ') + message + '</div>';
+            setTimeout(() => div.innerHTML = '', 3000);
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
+	`
+	ws.renderHTML(w, tmpl)
 }
 
 func (ws *WebServer) writeJSON(w http.ResponseWriter, success bool, message string, data interface{}) {
