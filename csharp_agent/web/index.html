@@ -84,7 +84,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     nodes.forEach(function(n) {
       var div = document.createElement('div');
       var nodeDiv = document.createElement('div');
-      var folder = !!n.isFolder;
+      var folder = !!n.is_folder;
       nodeDiv.className = 'node ' + (folder ? 'branch' : 'leaf');
       nodeDiv.textContent = (folder ? '> ' : '# ') + n.name;
 
@@ -101,7 +101,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
               childrenDiv.classList.remove('open');
             } else {
               if (!childrenDiv.dataset.loaded) {
-                loadChildren(cId, node.nodeId);
+                loadChildren(cId, node.node_id);
               }
               childrenDiv.classList.add('open');
             }
@@ -133,9 +133,9 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
   }
 
   function toggleTag(node) {
-    if (selected[node.nodeId]) { delete selected[node.nodeId]; }
+    if (selected[node.node_id]) { delete selected[node.node_id]; }
     else {
-      selected[node.nodeId] = { node_id: node.nodeId, name: node.name, description: '', data_type: '', enabled: true, active: true };
+      selected[node.node_id] = { node_id: node.node_id, name: node.name, description: '', data_type: '', enabled: true, active: true };
     }
     renderTagList();
   }
