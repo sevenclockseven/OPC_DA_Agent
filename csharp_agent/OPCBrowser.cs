@@ -67,10 +67,16 @@ namespace OPC_DA_Agent
                 OPCNAMESPACETYPE nsType;
                 browser.QueryOrganization(out nsType);
 
-                if (string.IsNullOrEmpty(nodeId))
-                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
-                else
-                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, nodeId);
+                browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
+
+                if (!string.IsNullOrEmpty(nodeId))
+                {
+                    string[] parts = nodeId.Split('.');
+                    foreach (string part in parts)
+                    {
+                        browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_DOWN, part);
+                    }
+                }
 
                 result.AddRange(DoBrowse(browser, OPCBROWSETYPE.OPC_BRANCH, true));
                 result.AddRange(DoBrowse(browser, OPCBROWSETYPE.OPC_LEAF, false));
