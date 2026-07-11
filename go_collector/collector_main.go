@@ -229,8 +229,12 @@ func (c *Collector) collectData() {
 			var transformedKey string
 			if dbName, ok := tagMapping[topic]; ok {
 				transformedKey = dbName
+				log.Printf("映射: %s -> %s (配置文件)", topic, dbName)
 			} else {
 				transformedKey = c.transformer.Transform(topic)
+				if transformedKey != topic {
+					log.Printf("转换: %s -> %s (规则)", topic, transformedKey)
+				}
 			}
 
 			keyValues[transformedKey] = value
@@ -271,6 +275,13 @@ func (c *Collector) buildTagMapping() map[string]string {
 			if tag.OpcTag != "" && tag.DbName != "" {
 				mapping[tag.OpcTag] = tag.DbName
 			}
+		}
+	}
+
+	if len(mapping) > 0 {
+		log.Printf("标签映射: %d 条", len(mapping))
+		for k, v := range mapping {
+			log.Printf("  %s -> %s", k, v)
 		}
 	}
 
