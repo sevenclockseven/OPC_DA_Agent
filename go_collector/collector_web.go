@@ -12,19 +12,19 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// WebServer Web配置服务器
 type WebServer struct {
 	configPath    string
 	configManager *ConfigManager
 	transformer   *KeyTransformer
+	collector     *Collector
 }
 
-// NewWebServer 创建Web服务器
-func NewWebServer(configPath string) *WebServer {
+func NewWebServer(configPath string, collector *Collector) *WebServer {
 	return &WebServer{
 		configPath:    configPath,
 		configManager: NewConfigManager(),
 		transformer:   NewKeyTransformer(),
+		collector:     collector,
 	}
 }
 
@@ -1015,8 +1015,12 @@ func (ws *WebServer) handleUpdateConfig(w http.ResponseWriter, r *http.Request) 
 
 	// 保存配置
 	if err := ws.configManager.Save(ws.configPath, config); err != nil {
-		ws.writeJSON(w, false, fmt.Sprintf("保存配置失败: %v", err), nil) // 返回错误信息
+		ws.writeJSON(w, false, fmt.Sprintf("保存配置失败: %v", err), nil)
 		return
+	}
+
+	if ws.collector != nil {
+		ws.collector.Reload(config)
 	}
 
 	ws.writeJSON(w, true, "配置已更新", nil)
@@ -1045,17 +1049,17 @@ func (ws *WebServer) handleValidateConfig(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// 验证HTTP配置
-	if config.HttpConfig != nil && config.HttpConfig.Enabled {
-		if config.HttpConfig.Url == "" {
-			errors = append(errors, "HTTP URL不能为空")
-		}
-		if config.HttpConfig.Timeout <= 0 {
-			errors = append(errors, "HTTP超时时间无效")
+	for _, httpConfig := range config.HttpConfigs {
+		if httpConfig.Enabled {
+			if httpConfig.Url == "" {
+				errors = append(errors, fmt.Sprintf("HTTP[%s] URL不能为空", httpConfig.Name))
+			}
+			if httpConfig.Timeout <= 0 {
+				errors = append(errors, fmt.Sprintf("HTTP[%s]超时时间无效", httpConfig.Name))
+			}
 		}
 	}
 
-	// 验证任务配置
 	if len(config.Tasks) == 0 {
 		warnings = append(warnings, "未配置任何任务")
 	}
@@ -1305,22 +1309,28 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 	}
 
-	// 处理HTTP配置
-	if httpData, ok := updates["http"].(map[string]interface{}); ok {
-		if config.HttpConfig == nil {
-			config.HttpConfig = &HttpConfig{}
-		}
-		if enabled, ok := httpData["enabled"].(bool); ok {
-			config.HttpConfig.Enabled = enabled
-		}
-		if url, ok := httpData["url"].(string); ok {
-			config.HttpConfig.Url = url
-		}
-		if method, ok := httpData["method"].(string); ok {
-			config.HttpConfig.Method = method
-		}
-		if timeout, ok := httpData["timeout"].(float64); ok {
-			config.HttpConfig.Timeout = int(timeout)
+	if httpConfigsData, ok := updates["http_configs"].([]interface{}); ok {
+		config.HttpConfigs = make([]*HttpConfig, 0)
+		for _, item := range httpConfigsData {
+			if httpData, ok := item.(map[string]interface{}); ok {
+				httpConfig := &HttpConfig{}
+				if name, ok := httpData["name"].(string); ok {
+					httpConfig.Name = name
+				}
+				if enabled, ok := httpData["enabled"].(bool); ok {
+					httpConfig.Enabled = enabled
+				}
+				if url, ok := httpData["url"].(string); ok {
+					httpConfig.Url = url
+				}
+				if method, ok := httpData["method"].(string); ok {
+					httpConfig.Method = method
+				}
+				if timeout, ok := httpData["timeout"].(float64); ok {
+					httpConfig.Timeout = int(timeout)
+				}
+				config.HttpConfigs = append(config.HttpConfigs, httpConfig)
+			}
 		}
 	}
 

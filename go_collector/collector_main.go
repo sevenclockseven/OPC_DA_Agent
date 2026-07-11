@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -64,12 +65,13 @@ func main() {
 	fmt.Printf("配置文件: %s\n", *configPath)
 	fmt.Printf("系统标题: %s\n", config.Title)
 	fmt.Printf("OPC服务器: %s\n", config.OpcServer)
-	os.Stdout.Sync() // 立即刷新输出
+	os.Stdout.Sync()
 
-	// 启动Web服务器
+	collector := NewCollector(config)
+
 	if *webPort > 0 {
 		go func() {
-			webServer := NewWebServer(*configPath)
+			webServer := NewWebServer(*configPath, collector)
 			if err := webServer.Start(*webPort); err != nil {
 				log.Printf("Web服务器启动失败: %v", err)
 			}
@@ -77,8 +79,6 @@ func main() {
 		fmt.Printf("Web服务器: http://localhost:%d\n", *webPort)
 	}
 
-	// 启动采集器
-	collector := NewCollector(config)
 	if err := collector.Start(); err != nil {
 		log.Fatalf("采集器启动失败: %v", err)
 	}
@@ -130,32 +130,39 @@ func waitForShutdown() {
 	<-sigChan
 }
 
-// Collector 采集器
 type Collector struct {
 	config      *AppConfig
-	transformer *KeyTransformer
-	httpClient  *HttpClient
+	httpClients []*HttpClient
 	mqttClient  *MqttClient
 	rtdbClient  *RtdbClient
 	running     bool
+	cancelFunc  context.CancelFunc
+}
+
+type TaskRunner struct {
+	task        *TaskConfig
+	transformer *KeyTransformer
+	config      *AppConfig
 }
 
 func NewCollector(config *AppConfig) *Collector {
-	transformer := NewKeyTransformer()
-	transformer.LoadFromFile("transform.json")
-
 	return &Collector{
-		config:      config,
-		transformer: transformer,
+		config: config,
 	}
 }
 
 func (c *Collector) Start() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancelFunc = cancel
 	c.running = true
 
-	if c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
-		c.httpClient = NewHttpClient(c.config.HttpConfig)
-		fmt.Println("✓ HTTP配置完成")
+	c.httpClients = make([]*HttpClient, 0)
+	for _, httpConfig := range c.config.HttpConfigs {
+		if httpConfig.Enabled {
+			client := NewHttpClient(httpConfig)
+			c.httpClients = append(c.httpClients, client)
+			fmt.Printf("✓ HTTP数据源[%s]配置完成\n", httpConfig.Name)
+		}
 	}
 
 	if c.config.MqttConfig != nil && c.config.MqttConfig.Enabled {
@@ -179,13 +186,30 @@ func (c *Collector) Start() error {
 		}
 	}
 
-	go c.collectLoop()
+	for _, task := range c.config.Tasks {
+		if task.Enabled {
+			runner := &TaskRunner{
+				task:        task,
+				config:      c.config,
+				transformer: NewKeyTransformer(),
+			}
+			transformFile := "transform.json"
+			if task.HttpSource != "" {
+				transformFile = "transform_" + task.HttpSource + ".json"
+			}
+			runner.transformer.LoadFromFile(transformFile)
+			go runner.run(ctx, c)
+		}
+	}
 
 	return nil
 }
 
 func (c *Collector) Stop() {
 	c.running = false
+	if c.cancelFunc != nil {
+		c.cancelFunc()
+	}
 
 	if c.mqttClient != nil {
 		c.mqttClient.Disconnect()
@@ -198,119 +222,59 @@ func (c *Collector) Stop() {
 	fmt.Println("采集器已停止")
 }
 
-func (c *Collector) collectLoop() {
-	// 模拟数据采集
-	ticker := time.NewTicker(time.Duration(c.config.Tasks[0].JobIntervalSecond) * time.Second)
+func (c *Collector) Reload(newConfig *AppConfig) {
+	c.Stop()
+	c.config = newConfig
+	c.Start()
+	log.Println("✅ 配置已热加载")
+}
+
+func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {
+	interval := time.Duration(tr.task.JobIntervalSecond) * time.Second
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for c.running {
+	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
-			c.collectData()
+			tr.collectData(collector)
 		}
 	}
 }
 
-func (c *Collector) collectData() {
-	c.transformer.LoadFromFile("transform.json")
+func (tr *TaskRunner) collectData(collector *Collector) {
+	transformFile := "transform.json"
+	if tr.task.HttpSource != "" {
+		transformFile = "transform_" + tr.task.HttpSource + ".json"
+	}
+	tr.transformer.LoadFromFile(transformFile)
 
 	var rawData []map[string]interface{}
 
-	if c.httpClient != nil && c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
-		fetched, err := c.fetchFromHttp()
-		if err != nil {
-			log.Printf("HTTP获取数据失败: %v", err)
-			return
-		}
-		rawData = fetched
-	} else {
-		rawData = []map[string]interface{}{
-			{"topic": "lt.sc.20251_M4102_ZZT", "value": 1.0, "quality": 192, "errorCode": 0},
-			{"topic": "lt.sc.20251_M4102_CYBJ", "value": 0.0, "quality": 192, "errorCode": 0},
-			{"topic": "lt.sc.20251_M4102_JYBJ", "value": 0.0, "quality": 192, "errorCode": 0},
-		}
-	}
-
-	tagMapping := c.buildTagMapping()
-
-	keyValues := make(map[string]interface{})
-	metadata := make(map[string]map[string]interface{})
-
-	for _, item := range rawData {
-		if errorCode, ok := item["errorCode"].(int); ok && errorCode == 0 {
-			topic := item["topic"].(string)
-			value := item["value"]
-			quality := item["quality"]
-
-			var transformedKey string
-			if dbName, ok := tagMapping[topic]; ok {
-				transformedKey = dbName
-				log.Printf("映射: %s -> %s (配置文件)", topic, dbName)
-			} else {
-				transformedKey = c.transformer.Transform(topic)
-				if transformedKey != topic {
-					log.Printf("转换: %s -> %s (规则)", topic, transformedKey)
+	if tr.task.HttpSource != "" {
+		for _, client := range collector.httpClients {
+			if client.config.Name == tr.task.HttpSource {
+				fetched, err := collector.fetchFromHttp(client)
+				if err != nil {
+					log.Printf("HTTP[%s]获取数据失败: %v", tr.task.HttpSource, err)
+					return
 				}
-			}
-
-			keyValues[transformedKey] = value
-			metadata[transformedKey] = map[string]interface{}{
-				"quality":   quality,
-				"timestamp": time.Now().Format(time.RFC3339),
+				rawData = fetched
+				break
 			}
 		}
-	}
-
-	if c.mqttClient != nil && c.mqttClient.IsConnected() {
-		message := map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"values":    keyValues,
-			"metadata":  metadata,
-		}
-		c.mqttClient.Publish(message)
-	}
-
-	if c.rtdbClient != nil && c.rtdbClient.IsConnected() {
-		message := map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"values":    keyValues,
-			"metadata":  metadata,
-		}
-		c.rtdbClient.Send(message)
-	}
-
-	if c.httpClient != nil {
-		message := map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"values":    keyValues,
-			"metadata":  metadata,
-		}
-		c.httpClient.Send(message)
-	}
-}
-
-func (c *Collector) buildTagMapping() map[string]string {
-	mapping := make(map[string]string)
-
-	for _, task := range c.config.Tasks {
-		if !task.Enabled {
-			continue
-		}
-		for _, tag := range task.Tags {
-			if tag.OpcTag != "" && tag.DbName != "" {
-				mapping[tag.OpcTag] = tag.DbName
+	} else if len(collector.httpClients) > 0 {
+		for _, client := range collector.httpClients {
+			fetched, err := collector.fetchFromHttp(client)
+			if err != nil {
+				log.Printf("HTTP[%s]获取数据失败: %v", client.config.Name, err)
+				continue
 			}
+			rawData = append(rawData, fetched...)
 		}
 	}
-
-	if len(mapping) > 0 {
-		log.Printf("标签映射: %d 条", len(mapping))
-		for k, v := range mapping {
-			log.Printf("  %s -> %s", k, v)
-		}
-	}
-
-	return mapping
 }
 
 type RtdbClient struct {
@@ -546,16 +510,16 @@ func (c *HttpClient) Send(message map[string]interface{}) {
 	log.Printf("HTTP发送成功: %s (状态码: %d)", c.config.Url, resp.StatusCode)
 }
 
-func (c *Collector) fetchFromHttp() ([]map[string]interface{}, error) {
-	if c.config.HttpConfig == nil || !c.config.HttpConfig.Enabled {
+func (c *Collector) fetchFromHttp(client *HttpClient) ([]map[string]interface{}, error) {
+	if client.config == nil || !client.config.Enabled {
 		return nil, fmt.Errorf("HTTP未启用")
 	}
 
-	client := &http.Client{
-		Timeout: time.Duration(c.config.HttpConfig.Timeout) * time.Millisecond,
+	httpClient := &http.Client{
+		Timeout: time.Duration(client.config.Timeout) * time.Millisecond,
 	}
 
-	resp, err := client.Get(c.config.HttpConfig.Url)
+	resp, err := httpClient.Get(client.config.Url)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP请求失败: %v", err)
 	}
