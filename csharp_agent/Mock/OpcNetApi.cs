@@ -382,6 +382,7 @@ namespace OpcNetApi
         private object _comServer;      // IOPCServer COM 对象
         private string _progId;
         private string _host;
+        private string _clsid;
         private bool _connected;
 
         /// <summary>获取底层 COM 对象（用于 QueryInterface 获取浏览等接口）</summary>
@@ -394,24 +395,37 @@ namespace OpcNetApi
         /// 创建服务器实例
         /// </summary>
         /// <param name="progIdOrUrl">OPC 服务器 ProgID（如 "KEPware.KEPServerEx.V4"）
-        /// 或 opcda://host/ProgID 格式的 URL</param>
+        /// 或 opcda://host/ProgID 格式的 URL
+        /// 或 opcda://host/{CLSID} 格式（使用花括号包裹 GUID）</param>
         public Server(string progIdOrUrl)
         {
             if (string.IsNullOrEmpty(progIdOrUrl))
                 throw new ArgumentNullException("progIdOrUrl");
 
-            // 解析 opcda://host/ProgID 格式
+            // 解析 opcda://host/xxx 格式
             if (progIdOrUrl.StartsWith("opcda://"))
             {
-                // opcda://172.16.32.98/KEPware.KEPServerEx.V4
                 var uri = new Uri(progIdOrUrl);
                 _host = uri.Host;
-                _progId = uri.AbsolutePath.TrimStart('/');
+                string path = uri.AbsolutePath.TrimStart('/');
+
+                // 检查是否是 CLSID 格式 {GUID}
+                if (path.StartsWith("{") && path.EndsWith("}"))
+                {
+                    _clsid = path;
+                    _progId = null;
+                }
+                else
+                {
+                    _progId = path;
+                    _clsid = null;
+                }
             }
             else
             {
                 _progId = progIdOrUrl;
-                _host = null; // 本机
+                _host = null;
+                _clsid = null;
             }
         }
 
@@ -422,7 +436,27 @@ namespace OpcNetApi
         {
             Type serverType = null;
 
-            if (string.IsNullOrEmpty(_host))
+            if (!string.IsNullOrEmpty(_clsid))
+            {
+                // 使用 CLSID 直接连接
+                try
+                {
+                    Guid clsid = new Guid(_clsid);
+                    if (string.IsNullOrEmpty(_host))
+                    {
+                        serverType = Type.GetTypeFromCLSID(clsid);
+                    }
+                    else
+                    {
+                        serverType = Type.GetTypeFromCLSID(clsid, _host);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception(string.Format("解析 CLSID 失败: {0}, 错误: {1}", _clsid, ex.Message));
+                }
+            }
+            else if (string.IsNullOrEmpty(_host))
             {
                 // 本机连接：通过 ProgID 获取 CLSID
                 serverType = Type.GetTypeFromProgID(_progId);
@@ -432,9 +466,10 @@ namespace OpcNetApi
             else
             {
                 // 远程连接：通过 ProgID 在远程主机上获取 CLSID
+                System.Diagnostics.Debug.WriteLine(string.Format("尝试远程连接: ProgID={0}, Host={1}", _progId, _host));
                 serverType = Type.GetTypeFromProgID(_progId, _host);
                 if (serverType == null)
-                    throw new Exception(string.Format("无法在远程主机 {0} 上找到 OPC 服务器 ProgID: {1}", _host, _progId));
+                    throw new Exception(string.Format("无法在远程主机 {0} 上找到 OPC 服务器 ProgID: {1}（请确认 OpcEnum 服务已启动，或使用 CLSID 连接）", _host, _progId));
             }
 
             _comServer = Activator.CreateInstance(serverType);

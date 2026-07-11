@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "rules": [
+    {
+      "description": "",
+      "enabled": true,
+      "index": 0,
+      "pattern": "Channel2.",
+      "replacement": "",
+      "rule_type": "RemovePrefix"
+    },
+    {
+      "description": "",
+      "enabled": true,
+      "index": 0,
+      "pattern": "",
+      "replacement": "10011_",
+      "rule_type": "AddPrefix"
+    }
+  ]
+}
