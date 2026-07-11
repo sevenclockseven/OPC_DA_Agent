@@ -3,6 +3,7 @@ bin/
 bin/Debug/
 bin/Release/
 *.dll
+!csharp_agent/OPCDAAuto.dll
 *.pdb
 *.obj
 *.exe
