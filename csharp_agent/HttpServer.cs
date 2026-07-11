@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -259,194 +259,21 @@ namespace OPC_DA_Agent
             return Encoding.UTF8.GetBytes(html);
         }
 
-        /// <summary>返回单页 Web UI（浏览+选择标签）</summary>
         private string GetWebUI()
         {
-            return @"<!DOCTYPE html>
-<html lang=""zh-CN"">
-<head>
-<meta charset=""UTF-8"">
-<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-<title>OPC DA 数据采集代理 - 标签配置</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:""Microsoft YaHei"",""Segoe UI"",sans-serif;background:#1e1e2e;color:#cdd6f4}
-.container{display:flex;height:100vh}
-.left{width:55%;border-right:1px solid #45475a;overflow:auto;padding:16px}
-.right{width:45%;padding:16px;overflow:auto}
-h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
-.node{cursor:pointer;padding:4px 8px;border-radius:6px;margin:2px 0;font-size:14px}
-.node:hover{background:#313244}
-.node.branch{color:#89b4fa}
-.node.leaf{color:#a6e3a1}
-.node.selected{background:#45475a}
-.children{margin-left:20px;display:none}
-.children.open{display:block}
-.btn{padding:8px 20px;border:none;border-radius:8px;background:#cba6f7;color:#1e1e2e;font-weight:bold;cursor:pointer;margin:8px 0}
-.btn:hover{background:#b4befe}
-.tag-list{list-style:none;margin:8px 0}
-.tag-item{padding:6px 12px;background:#313244;border-radius:6px;margin:4px 0;display:flex;justify-content:space-between;align-items:center}
-.tag-remove{color:#f38ba8;cursor:pointer;font-weight:bold}
-.status-bar{position:fixed;bottom:0;left:0;right:0;background:#181825;padding:8px 16px;font-size:12px;color:#6c7086}
-.connected{color:#a6e3a1}.disconnected{color:#f38ba8}
-</style>
-</head>
-<body>
-<div class=""container"">
-  <div class=""left"">
-    <h2>OPC 节点浏览</h2>
-    <button class=""btn"" onclick=""loadRoot()"" id=""btnBrowse"">浏览根节点</button>
-    <div id=""tree""></div>
-  </div>
-  <div class=""right"">
-    <h2>已选标签</h2>
-    <button class=""btn"" onclick=""saveTags()"">保存并应用</button>
-    <ul class=""tag-list"" id=""tagList""></ul>
-  </div>
-</div>
-<div class=""status-bar"" id=""statusBar"">连接中...</div>
-<script>
-var selected = {};
-var port = location.port || 8080;
-var base = '' + location.protocol + '//' + location.hostname + ':' + port;
-
-function api(path, method, data, cb) {
-  var x = new XMLHttpRequest();
-  x.open(method || 'GET', base + path);
-  x.setRequestHeader('Content-Type', 'application/json');
-  x.onload = function() {
-    try { cb(JSON.parse(x.responseText)); } catch(e) { cb({success:false,message:e.message}); }
-  };
-  x.send(data ? JSON.stringify(data) : null);
-}
-
-function loadRoot() {
-  document.getElementById('tree').innerHTML = '<p>加载中...</p>';
-  api('/api/browse', 'GET', null, function(r) {
-    if (r.success) renderTree('tree', r.data);
-    else document.getElementById('tree').innerHTML = '<p style=color:#f38ba8>错误: ' + r.message + '</p>';
-  });
-}
-
-function renderTree(parentId, nodes) {
-  var parent = document.getElementById(parentId);
-  parent.innerHTML = '';
-  if (!nodes || nodes.length === 0) {
-    parent.innerHTML = '<p style=color:#6c7086>（无子节点）</p>';
-    return;
-  }
-  nodes.forEach(function(n) {
-    var div = document.createElement('div');
-    var nodeDiv = document.createElement('div');
-    nodeDiv.className = 'node ' + (n.isFolder ? 'branch' : 'leaf');
-    nodeDiv.textContent = (n.isFolder ? '📁 ' : '🏷 ') + n.name;
-    nodeDiv.onclick = function() {
-      if (n.isFolder) {
-        var childrenDiv = document.getElementById('children-' + parentId + '-' + n.nodeId);
-        if (childrenDiv) {
-          if (childrenDiv.classList.contains('open')) {
-            childrenDiv.classList.remove('open');
-          } else {
-            if (!childrenDiv.dataset.loaded) {
-              loadChildren('children-' + parentId + '-' + n.nodeId, n.nodeId);
+            string webRoot = AppDomain.CurrentDomain.BaseDirectory;
+            string[] candidates = new string[] {
+                Path.Combine(webRoot, "web", "index.html"),
+                Path.Combine(webRoot, "index.html"),
+            };
+            foreach (string p in candidates)
+            {
+                if (File.Exists(p))
+                {
+                    return File.ReadAllText(p);
+                }
             }
-            childrenDiv.classList.add('open');
-          }
-        }
-      } else {
-        toggleTag(n);
-        nodeDiv.classList.toggle('selected');
-      }
-    };
-    div.appendChild(nodeDiv);
-
-    if (n.isFolder) {
-      var childrenDiv = document.createElement('div');
-      childrenDiv.id = 'children-' + parentId + '-' + n.nodeId;
-      childrenDiv.className = 'children';
-      div.appendChild(childrenDiv);
-    }
-    parent.appendChild(div);
-  });
-}
-
-function loadChildren(containerId, nodeId) {
-  var container = document.getElementById(containerId);
-  container.innerHTML = '<p style=color:#6c7086>加载中...</p>';
-  var url = '/api/browse/node?nodeId=' + encodeURIComponent(nodeId);
-  api(url, 'GET', null, function(r) {
-    if (r.success) {
-      renderTree(containerId, r.data);
-      container.dataset.loaded = '1';
-    } else {
-      container.innerHTML = '<p style=color:#f38ba8>' + r.message + '</p>';
-    }
-  });
-}
-
-function toggleTag(node) {
-  if (selected[node.nodeId]) {
-    delete selected[node.nodeId];
-  } else {
-    selected[node.nodeId] = { node_id: node.nodeId, name: node.name, description: '', data_type: '', enabled: true, active: true };
-  }
-  renderTagList();
-}
-
-function renderTagList() {
-  var ul = document.getElementById('tagList');
-  ul.innerHTML = '';
-  var keys = Object.keys(selected);
-  if (keys.length === 0) {
-    ul.innerHTML = '<p style=color:#6c7086>未选择任何标签</p>';
-    return;
-  }
-  keys.forEach(function(id) {
-    var t = selected[id];
-    var li = document.createElement('li');
-    li.className = 'tag-item';
-    li.innerHTML = '<span>' + t.name + '</span><span class=""tag-remove"" onclick=""removeTag(\\''+ id + '\\')"">✕</span>';
-    ul.appendChild(li);
-  });
-}
-
-function removeTag(id) {
-  delete selected[id];
-  renderTagList();
-}
-
-function saveTags() {
-  var keys = Object.keys(selected);
-  if (keys.length === 0) {
-    alert('请先选择标签');
-    return;
-  }
-  var tags = keys.map(function(id) {
-    return selected[id];
-  });
-  api('/api/tags', 'POST', { tags: tags }, function(r) {
-    if (r.success) alert(r.message || '保存成功');
-    else alert('保存失败: ' + r.message);
-  });
-}
-
-function loadStatus() {
-  api('/api/status', 'GET', null, function(r) {
-    if (r.success && r.data) {
-      var s = r.data;
-      var cls = s.isConnected ? 'connected' : 'disconnected';
-      var text = s.isConnected ? '已连接' : '未连接';
-      document.getElementById('statusBar').innerHTML = '<span class=""' + cls + '"">● ' + text + '</span> | 标签: ' + s.tagCount + ' | 读取: ' + s.totalReads + ' | 错误: ' + s.totalErrors + ' | 运行: ' + Math.floor(s.uptimeSeconds) + '秒';
-    }
-  });
-}
-
-loadRoot();
-loadStatus();
-setInterval(loadStatus, 3000);
-</script>
-</body>
-</html>";
+            return "<!DOCTYPE html><html><body><h1>Web UI not found</h1><p>Looked in: " + string.Join("; ", candidates) + "</p></body></html>";
         }
 
         public void Dispose() { Stop(); }
