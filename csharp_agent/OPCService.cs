@@ -17,6 +17,11 @@ namespace OPC_DA_Agent
         private bool _isRunning;
         private object _lock = new object();
 
+        private Array _serverHandles;
+        private Array _errors;
+        private int _cancelId;
+        private int _transactionId = 1;
+
         private long _totalReads = 0;
         private long _totalErrors = 0;
         private DateTime _startTime;
@@ -127,34 +132,37 @@ namespace OPC_DA_Agent
             {
                 if (_opcGroup == null) return;
 
-                var itemIds = new List<string>();
+                var opcItemIDs = new List<string>();
                 var clientHandles = new List<int>();
-                int handle = 1;
+
+                opcItemIDs.Add("");
+                clientHandles.Add(0);
 
                 foreach (var tag in _tags)
                 {
                     if (tag.Enabled || tag.Active)
                     {
-                        itemIds.Add(tag.NodeId);
-                        clientHandles.Add(handle++);
+                        opcItemIDs.Add(tag.NodeId);
+                        clientHandles.Add(opcItemIDs.Count);
                     }
                 }
 
-                if (itemIds.Count > 0)
+                if (opcItemIDs.Count > 1)
                 {
-                    Array opcItems = itemIds.ToArray();
+                    Array itemsArray = opcItemIDs.ToArray();
                     Array handlesArray = clientHandles.ToArray();
-                    Array serverHandles;
-                    Array errors;
 
-                    _opcGroup.OPCItems.AddItems(itemIds.Count, opcItems, handlesArray, out serverHandles, out errors);
-                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
+                    _opcGroup.OPCItems.AddItems(opcItemIDs.Count - 1, itemsArray, handlesArray, out _serverHandles, out _errors);
+                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", opcItemIDs.Count - 1, _tags.Count));
 
                     lock (_lock)
                     {
-                        foreach (string id in itemIds)
+                        foreach (var tag in _tags)
                         {
-                            _lastValues[id] = null;
+                            if (tag.Enabled || tag.Active)
+                            {
+                                _lastValues[tag.NodeId] = null;
+                            }
                         }
                     }
                 }
@@ -185,31 +193,22 @@ namespace OPC_DA_Agent
                 int count = _opcGroup.OPCItems.Count;
                 if (count == 0) return;
 
-                Array serverHandles = new object[count + 1];
-                for (int i = 1; i <= count; i++)
-                {
-                    serverHandles.SetValue(i, i);
-                }
-
-                Array values;
-                Array errors;
-                object qualities;
-                object timestamps;
-
-                _opcGroup.SyncRead(2, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
+                _opcGroup.AsyncRead(count, ref _serverHandles, out _errors, _transactionId++, out _cancelId);
 
                 lock (_lock)
                 {
-                    if (values is Array valArray)
+                    var enabledTags = _tags.FindAll(t => t.Enabled || t.Active);
+                    for (int i = 0; i < count && i < enabledTags.Count; i++)
                     {
-                        for (int i = 1; i <= count; i++)
+                        try
                         {
-                            if (i - 1 < _tags.Count)
-                            {
-                                string tagId = _tags[i - 1].NodeId;
-                                _lastValues[tagId] = valArray.GetValue(i);
-                            }
+                            object value;
+                            int quality;
+                            DateTime timestamp;
+                            _opcGroup.OPCItems.Item(i + 1).Read(2, out value, out quality, out timestamp);
+                            _lastValues[enabledTags[i].NodeId] = value;
                         }
+                        catch { }
                     }
                 }
                 _totalReads++;
@@ -265,11 +264,7 @@ namespace OPC_DA_Agent
                     System.Reflection.BindingFlags.GetProperty | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
                     null, _opcServer, null);
 
-                if (browser == null)
-                {
-                    _logger.Error("[Browse] 未找到 OPCBrowser 属性");
-                    return result;
-                }
+                if (browser == null) return result;
 
                 dynamic dynBrowser = browser;
                 dynBrowser.MoveToRoot();
@@ -284,10 +279,8 @@ namespace OPC_DA_Agent
                 }
 
                 dynBrowser.ShowBranches();
-                IEnumerator branchEnum = ((IEnumerable)dynBrowser).GetEnumerator();
-                while (branchEnum.MoveNext())
+                foreach (string branch in dynBrowser)
                 {
-                    string branch = branchEnum.Current as string;
                     if (!string.IsNullOrEmpty(branch))
                     {
                         result.Add(new OPCNode
@@ -303,10 +296,8 @@ namespace OPC_DA_Agent
                 }
 
                 dynBrowser.ShowLeafs(true);
-                IEnumerator leafEnum = ((IEnumerable)dynBrowser).GetEnumerator();
-                while (leafEnum.MoveNext())
+                foreach (string leaf in dynBrowser)
                 {
-                    string leaf = leafEnum.Current as string;
                     if (!string.IsNullOrEmpty(leaf))
                     {
                         string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
@@ -346,8 +337,7 @@ namespace OPC_DA_Agent
                             {
                                 handles.SetValue(i, i);
                             }
-                            Array errors;
-                            _opcGroup.OPCItems.Remove(count, ref handles, out errors);
+                            _opcGroup.OPCItems.Remove(count, ref handles, out _errors);
                         }
                     }
                     catch { }
