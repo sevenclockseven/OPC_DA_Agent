@@ -133,8 +133,9 @@ func waitForShutdown() {
 type Collector struct {
 	config      *AppConfig
 	transformer *KeyTransformer
-	mqttClient  *MqttClient
 	httpClient  *HttpClient
+	mqttClient  *MqttClient
+	rtdbClient  *RtdbClient
 	running     bool
 }
 
@@ -151,6 +152,11 @@ func NewCollector(config *AppConfig) *Collector {
 func (c *Collector) Start() error {
 	c.running = true
 
+	if c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
+		c.httpClient = NewHttpClient(c.config.HttpConfig)
+		fmt.Println("✓ HTTP配置完成")
+	}
+
 	if c.config.MqttConfig != nil && c.config.MqttConfig.Enabled {
 		c.mqttClient = NewMqttClient(c.config.MqttConfig)
 		if err := c.mqttClient.Connect(); err != nil {
@@ -159,9 +165,12 @@ func (c *Collector) Start() error {
 		fmt.Println("✓ MQTT连接成功")
 	}
 
-	if c.config.HttpConfig != nil && c.config.HttpConfig.Enabled {
-		c.httpClient = NewHttpClient(c.config.HttpConfig)
-		fmt.Println("✓ HTTP配置完成")
+	if c.config.RtdbConfig != nil && c.config.RtdbConfig.Enabled {
+		c.rtdbClient = NewRtdbClient(c.config.RtdbConfig)
+		if err := c.rtdbClient.Connect(); err != nil {
+			return fmt.Errorf("RTDB连接失败: %v", err)
+		}
+		fmt.Println("✓ RTDB连接成功")
 	}
 
 	go c.collectLoop()
@@ -174,6 +183,10 @@ func (c *Collector) Stop() {
 
 	if c.mqttClient != nil {
 		c.mqttClient.Disconnect()
+	}
+
+	if c.rtdbClient != nil {
+		c.rtdbClient.Disconnect()
 	}
 
 	fmt.Println("采集器已停止")
@@ -251,6 +264,15 @@ func (c *Collector) collectData() {
 		c.mqttClient.Publish(message)
 	}
 
+	if c.rtdbClient != nil && c.rtdbClient.IsConnected() {
+		message := map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"values":    keyValues,
+			"metadata":  metadata,
+		}
+		c.rtdbClient.Send(message)
+	}
+
 	if c.httpClient != nil {
 		message := map[string]interface{}{
 			"timestamp": time.Now().Format(time.RFC3339),
@@ -285,7 +307,78 @@ func (c *Collector) buildTagMapping() map[string]string {
 	return mapping
 }
 
-// MqttClient MQTT客户端
+type RtdbClient struct {
+	config    *RtdbConfig
+	connected bool
+}
+
+func NewRtdbClient(config *RtdbConfig) *RtdbClient {
+	return &RtdbClient{
+		config: config,
+	}
+}
+
+func (c *RtdbClient) Connect() error {
+	c.connected = true
+	log.Println("✅ RTDB客户端已初始化")
+	return nil
+}
+
+func (c *RtdbClient) Disconnect() {
+	c.connected = false
+	log.Println("📴 RTDB已断开")
+}
+
+func (c *RtdbClient) IsConnected() bool {
+	return c.connected
+}
+
+func (c *RtdbClient) Send(message map[string]interface{}) error {
+	if !c.IsConnected() {
+		return fmt.Errorf("RTDB未连接")
+	}
+
+	values, ok := message["values"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("无效的消息格式")
+	}
+
+	metadata, _ := message["metadata"].(map[string]map[string]interface{})
+
+	for key, value := range values {
+		line := c.formatLine(key, value, metadata[key])
+		log.Printf("RTDB发送: %s", line)
+	}
+
+	return nil
+}
+
+func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]interface{}) string {
+	format := c.config.Format
+	if format == "" {
+		format = "{key},{value},{quality},{timestamp}"
+	}
+
+	quality := 192
+	timestamp := ""
+	if meta != nil {
+		if q, ok := meta["quality"].(int); ok {
+			quality = q
+		}
+		if t, ok := meta["timestamp"].(string); ok {
+			timestamp = t
+		}
+	}
+
+	result := format
+	result = strings.ReplaceAll(result, "{key}", key)
+	result = strings.ReplaceAll(result, "{value}", fmt.Sprintf("%v", value))
+	result = strings.ReplaceAll(result, "{quality}", fmt.Sprintf("%d", quality))
+	result = strings.ReplaceAll(result, "{timestamp}", timestamp)
+
+	return result
+}
+
 type MqttClient struct {
 	config *MqttConfig
 	client mqtt.Client
