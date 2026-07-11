@@ -1203,20 +1203,16 @@ func (ws *WebServer) handleTransformPreview(w http.ResponseWriter, r *http.Reque
 }
 
 func (ws *WebServer) handleGetTransformRules(w http.ResponseWriter, r *http.Request) {
-	// 从配置文件加载转换规则
-	// 这里简化处理，实际应从配置文件读取
-	rules := []TransformRule{
-		{
-			RuleType:    "RemovePrefix",
-			Pattern:     "lt.sc.",
-			Enabled:     true,
-			Description: "移除lt.sc.前缀",
-		},
+	data, err := os.ReadFile("transform.json")
+	if err != nil {
+		ws.writeJSON(w, false, "读取规则文件失败: "+err.Error(), nil)
+		return
 	}
 
-	config := map[string]interface{}{
-		"enabled": true,
-		"rules":   rules,
+	var config map[string]interface{}
+	if err := json.Unmarshal(data, &config); err != nil {
+		ws.writeJSON(w, false, "解析规则文件失败: "+err.Error(), nil)
+		return
 	}
 
 	ws.writeJSON(w, true, "规则加载成功", config)
@@ -1235,10 +1231,18 @@ func (ws *WebServer) handleUpdateTransformRules(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 保存转换规则到配置文件
-	// 这里简化处理
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		ws.writeJSON(w, false, "序列化失败", nil)
+		return
+	}
 
-	ws.writeJSON(w, true, "规则已保存", nil)
+	if err := os.WriteFile("transform.json", data, 0644); err != nil {
+		ws.writeJSON(w, false, "保存规则文件失败: "+err.Error(), nil)
+		return
+	}
+
+	ws.writeJSON(w, true, "规则已保存到 transform.json", nil)
 }
 
 // 辅助函数

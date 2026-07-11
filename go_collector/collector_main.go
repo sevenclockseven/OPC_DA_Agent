@@ -377,8 +377,19 @@ func (c *HttpClient) Send(message map[string]interface{}) {
 		Timeout: time.Duration(c.config.Timeout) * time.Millisecond,
 	}
 
-	resp, err := client.Post(c.config.Url, "application/json", 
-		strings.NewReader(string(jsonData)))
+	method := c.config.Method
+	if method == "" {
+		method = "POST"
+	}
+
+	var resp *http.Response
+	if method == "GET" {
+		resp, err = client.Get(c.config.Url)
+	} else {
+		resp, err = client.Post(c.config.Url, "application/json",
+			strings.NewReader(string(jsonData)))
+	}
+
 	if err != nil {
 		log.Printf("HTTP发送失败: %v", err)
 		return
