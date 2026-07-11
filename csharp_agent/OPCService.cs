@@ -153,8 +153,8 @@ namespace OPC_DA_Agent
 
                 if (itemIds.Count > 0)
                 {
-                    object serverHandles;
-                    object errors;
+                    Array serverHandles;
+                    Array errors;
 
                     _opcGroup.OPCItems.AddItems(itemIds.Count, itemIds.ToArray(), clientHandles.ToArray(), out serverHandles, out errors);
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
@@ -209,7 +209,7 @@ namespace OPC_DA_Agent
                 Array values;
                 Array qualities;
                 Array timestamps;
-                object errors;
+                Array errors;
 
                 _opcGroup.SyncRead(2, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
 
@@ -359,7 +359,7 @@ namespace OPC_DA_Agent
                             {
                                 handles.SetValue(i, i);
                             }
-                            object errors;
+                            Array errors;
                             _opcGroup.OPCItems.Remove(count, ref handles, out errors);
                         }
                     }
