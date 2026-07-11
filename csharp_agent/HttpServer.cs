@@ -11,7 +11,7 @@ namespace OPC_DA_Agent
 {
     public class HttpServer : IDisposable
     {
-        private readonly HttpListener _listener;
+        private HttpListener _listener;
         private readonly OPCService _opcService;
         private readonly Logger _logger;
         private readonly Config _config;
@@ -19,8 +19,6 @@ namespace OPC_DA_Agent
         private bool _isRunning;
 
         private long _requestCount = 0;
-
-        private HttpListener _listener;
 
         public HttpServer(Config config, OPCService opcService, Logger logger)
         {
