@@ -207,8 +207,8 @@ namespace OPC_DA_Agent
                 }
 
                 Array values;
-                Array qualities;
-                Array timestamps;
+                object qualities;
+                object timestamps;
                 Array errors;
 
                 _opcGroup.SyncRead(2, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
@@ -284,21 +284,38 @@ namespace OPC_DA_Agent
             var result = new List<OPCNode>();
             try
             {
-                var browser = _opcServer.OPCBrowser;
+                Type serverType = _opcServer.GetType();
+                object browser = null;
 
-                browser.MoveToRoot();
+                foreach (var prop in serverType.GetProperties())
+                {
+                    if (prop.Name.Contains("Browse") || prop.Name.Contains("browser"))
+                    {
+                        browser = prop.GetValue(_opcServer, null);
+                        break;
+                    }
+                }
+
+                if (browser == null)
+                {
+                    _logger.Error("[Browse] 未找到浏览接口，当前OPC服务器可能不支持浏览");
+                    return result;
+                }
+
+                dynamic dynBrowser = browser;
+                dynBrowser.MoveToRoot();
 
                 if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
                 {
                     string[] parts = nodeId.Split('.');
                     foreach (string part in parts)
                     {
-                        browser.MoveDown(part);
+                        dynBrowser.MoveDown(part);
                     }
                 }
 
-                browser.ShowBranches();
-                foreach (string branch in browser)
+                dynBrowser.ShowBranches();
+                foreach (string branch in dynBrowser)
                 {
                     if (!string.IsNullOrEmpty(branch))
                     {
@@ -314,8 +331,8 @@ namespace OPC_DA_Agent
                     }
                 }
 
-                browser.ShowLeafs(true);
-                foreach (string leaf in browser)
+                dynBrowser.ShowLeafs(true);
+                foreach (string leaf in dynBrowser)
                 {
                     if (!string.IsNullOrEmpty(leaf))
                     {
