@@ -136,161 +136,233 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>HTTP配置 - OPC DA Collector</title>
+    <title>数据源配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
         h1 { color: #333; }
+        .http-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px; margin-top: 20px; }
+        .http-card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 15px; }
+        .http-card.disabled { opacity: 0.6; }
+        .http-name { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px; }
+        .http-info { color: #666; font-size: 14px; line-height: 1.6; }
+        .http-actions { margin-top: 10px; display: flex; gap: 8px; }
+        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-edit { background: #2196F3; color: white; }
+        .btn:hover { opacity: 0.85; }
+        .add-http { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-top: 15px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
         input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: white; }
+        .badge-on { background: #4CAF50; }
+        .badge-off { background: #999; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📡 MQTT配置</h1>
         <a href="/" class="back">← 返回首页</a>
+        <h1>🌐 数据源配置</h1>
+        <p>配置HTTP数据源（C# OPC DA Agent地址）</p>
+        <div id="result"></div>
 
-        <form id="mqttForm">
-            <div class="form-group">
-                <label>启用MQTT</label>
-                <select id="enabled" name="enabled">
-                    <option value="true">是</option>
-                    <option value="false">否</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>MQTT服务器地址</label>
-                <input type="text" id="broker" name="broker" placeholder="例如: 172.16.32.98">
-            </div>
-            <div class="form-group">
-                <label>端口</label>
-                <input type="number" id="port" name="port" value="1883">
-            </div>
-            <div class="form-group">
-                <label>主题</label>
-                <input type="text" id="topic" name="topic" placeholder="例如: opc/data" value="opc/data">
-            </div>
-            <div class="form-group">
-                <label>用户名（可选）</label>
-                <input type="text" id="username" name="username" placeholder="用户名">
-            </div>
-            <div class="form-group">
-                <label>密码（可选）</label>
-                <input type="password" id="password" name="password" placeholder="密码">
-            </div>
-            <div class="form-group">
-                <label>客户端ID</label>
-                <input type="text" id="client_id" name="client_id" placeholder="例如: opc_collector_01">
-            </div>
-            <div class="form-group">
-                <label>QoS</label>
-                <select id="qos" name="qos">
-                    <option value="0">0 - 最多一次</option>
-                    <option value="1" selected>1 - 至少一次</option>
-                    <option value="2">2 - 确保一次</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>保留消息</label>
-                <select id="retain" name="retain">
-                    <option value="false">否</option>
-                    <option value="true">是</option>
-                </select>
-            </div>
+        <div class="http-grid" id="httpGrid"></div>
 
-            <h3>发送格式配置</h3>
-            <div class="form-group">
-                <label>MQTT发送格式</label>
-                <select id="format" name="format">
-                    <option value="full">完整格式（包含timestamp, values, metadata）</option>
-                    <option value="flat">扁平格式（仅values）</option>
-                </select>
+        <button class="add-http" onclick="openModal()">+ 添加数据源</button>
+
+        <div class="modal" id="httpModal">
+            <div class="modal-content">
+                <h2 id="modalTitle">添加数据源</h2>
+                <div class="form-group">
+                    <label>数据源名称</label>
+                    <input type="text" id="httpName" placeholder="例：数据源1">
+                </div>
+                <div class="form-group">
+                    <label>启用</label>
+                    <select id="httpEnabled">
+                        <option value="true">启用</option>
+                        <option value="false">禁用</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>URL地址</label>
+                    <input type="text" id="httpUrl" placeholder="例：http://192.168.1.100:8080/api/data">
+                </div>
+                <div class="form-group">
+                    <label>请求方法</label>
+                    <select id="httpMethod">
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>超时时间(毫秒)</label>
+                    <input type="number" id="httpTimeout" value="5000" min="1000">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" onclick="closeModal()" style="background:#666;color:white;">取消</button>
+                    <button class="btn btn-primary" onclick="saveHttp()">保存</button>
+                </div>
             </div>
-
-            <button type="button" onclick="saveMqtt()">💾 保存配置</button>
-            <button type="button" class="test" onclick="testMqtt()">🧪 测试连接</button>
-        </form>
-
-        <div id="result" style="margin-top: 20px;"></div>
+        </div>
     </div>
 
     <script>
-        async function loadMqtt() {
-            const response = await fetch('/api/config');
-            const data = await response.json();
-            if (data.success && data.data.mqtt) {
-                const mqtt = data.data.mqtt;
-                document.getElementById('enabled').value = mqtt.enabled?.toString() || 'false';
-                document.getElementById('broker').value = mqtt.broker || '';
-                document.getElementById('port').value = mqtt.port || 1883;
-                document.getElementById('topic').value = mqtt.topic || 'opc/data';
-                document.getElementById('username').value = mqtt.username || '';
-                document.getElementById('password').value = mqtt.password || '';
-                document.getElementById('client_id').value = mqtt.client_id || '';
-                document.getElementById('qos').value = mqtt.qos?.toString() || '1';
-                document.getElementById('retain').value = mqtt.retain?.toString() || 'false';
-                document.getElementById('format').value = mqtt.format || 'full';
+        let httpConfigs = [];
+        let editingIndex = -1;
+
+        async function loadData() {
+            try {
+                const resp = await fetch('/api/config');
+                const data = await resp.json();
+                if (data.success) {
+                    httpConfigs = data.data.http_configs || [];
+                    renderHttpConfigs();
+                }
+            } catch (e) {
+                showResult(false, '加载配置失败: ' + e.message);
             }
         }
 
-        async function saveMqtt() {
-            const mqtt = {
-                enabled: document.getElementById('enabled').value === 'true',
-                broker: document.getElementById('broker').value,
-                port: parseInt(document.getElementById('port').value),
-                topic: document.getElementById('topic').value,
-                username: document.getElementById('username').value,
-                password: document.getElementById('password').value,
-                client_id: document.getElementById('client_id').value,
-                qos: parseInt(document.getElementById('qos').value),
-                retain: document.getElementById('retain').value === 'true',
-                format: document.getElementById('format').value
+        function renderHttpConfigs() {
+            const grid = document.getElementById('httpGrid');
+            if (httpConfigs.length === 0) {
+                grid.innerHTML = '<div style="color:#999;padding:20px;">暂无数据源，请点击下方按钮添加</div>';
+                return;
+            }
+
+            grid.innerHTML = '';
+            httpConfigs.forEach((config, index) => {
+                const card = document.createElement('div');
+                card.className = 'http-card' + (config.enabled ? '' : ' disabled');
+                card.innerHTML =
+                    '<div class="http-name">' + (config.name || '数据源' + (index+1)) + ' <span class="badge ' + (config.enabled ? 'badge-on' : 'badge-off') + '">' + (config.enabled ? '启用' : '禁用') + '</span></div>' +
+                    '<div class="http-info">' +
+                    'URL: ' + (config.url || '未配置') + '<br>' +
+                    '方法: ' + (config.method || 'GET') + '<br>' +
+                    '超时: ' + (config.timeout || 5000) + 'ms' +
+                    '</div>' +
+                    '<div class="http-actions">' +
+                    '<button class="btn btn-edit" onclick="editHttp(' + index + ')">编辑</button>' +
+                    '<button class="btn btn-danger" onclick="deleteHttp(' + index + ')">删除</button>' +
+                    '</div>';
+                grid.appendChild(card);
+            });
+        }
+
+        function openModal(index) {
+            editingIndex = index !== undefined ? index : -1;
+            document.getElementById('modalTitle').textContent = index !== undefined ? '编辑数据源' : '添加数据源';
+
+            if (index !== undefined && httpConfigs[index]) {
+                const config = httpConfigs[index];
+                document.getElementById('httpName').value = config.name || '';
+                document.getElementById('httpEnabled').value = config.enabled ? 'true' : 'false';
+                document.getElementById('httpUrl').value = config.url || '';
+                document.getElementById('httpMethod').value = config.method || 'GET';
+                document.getElementById('httpTimeout').value = config.timeout || 5000;
+            } else {
+                document.getElementById('httpName').value = '';
+                document.getElementById('httpEnabled').value = 'true';
+                document.getElementById('httpUrl').value = '';
+                document.getElementById('httpMethod').value = 'GET';
+                document.getElementById('httpTimeout').value = 5000;
+            }
+
+            document.getElementById('httpModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('httpModal').style.display = 'none';
+            editingIndex = -1;
+        }
+
+        async function saveHttp() {
+            const name = document.getElementById('httpName').value.trim();
+            const url = document.getElementById('httpUrl').value.trim();
+            if (!name || !url) {
+                showResult(false, '名称和URL不能为空');
+                return;
+            }
+
+            const config = {
+                name: name,
+                enabled: document.getElementById('httpEnabled').value === 'true',
+                url: url,
+                method: document.getElementById('httpMethod').value,
+                timeout: parseInt(document.getElementById('httpTimeout').value) || 5000
             };
 
-            const response = await fetch('/api/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mqtt })
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        async function testMqtt() {
-            const response = await fetch('/api/mqtt/test', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    broker: document.getElementById('broker').value,
-                    port: parseInt(document.getElementById('port').value),
-                    username: document.getElementById('username').value,
-                    password: document.getElementById('password').value
-                })
-            });
-
-            const result = await response.json();
-            showResult(result);
-        }
-
-        function showResult(result) {
-            const div = document.getElementById('result');
-            if (result.success) {
-                div.innerHTML = '<div class="success">✓ ' + (result.message || '操作成功') + '</div>';
+            if (editingIndex >= 0) {
+                httpConfigs[editingIndex] = config;
             } else {
-                div.innerHTML = '<div class="error">✗ ' + (result.message || '操作失败') + '</div>';
+                httpConfigs.push(config);
+            }
+
+            try {
+                const resp = await fetch('/api/config');
+                const fullConfig = await resp.json();
+                if (fullConfig.success) {
+                    fullConfig.data.http_configs = httpConfigs;
+                    const saveResp = await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(fullConfig.data)
+                    });
+                    const result = await saveResp.json();
+                    showResult(result.success, result.message);
+                    if (result.success) {
+                        closeModal();
+                        loadData();
+                    }
+                }
+            } catch (e) {
+                showResult(false, '保存失败: ' + e.message);
             }
         }
 
-        loadMqtt();
+        function editHttp(index) {
+            openModal(index);
+        }
+
+        async function deleteHttp(index) {
+            if (!confirm('确认删除此数据源？')) return;
+            httpConfigs.splice(index, 1);
+
+            try {
+                const resp = await fetch('/api/config');
+                const fullConfig = await resp.json();
+                if (fullConfig.success) {
+                    fullConfig.data.http_configs = httpConfigs;
+                    const saveResp = await fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(fullConfig.data)
+                    });
+                    const result = await saveResp.json();
+                    showResult(result.success, result.message);
+                    if (result.success) loadData();
+                }
+            } catch (e) {
+                showResult(false, '删除失败: ' + e.message);
+            }
+        }
+
+        function showResult(success, message) {
+            const div = document.getElementById('result');
+            div.innerHTML = '<div class="' + (success ? 'success' : 'error') + '">' + (success ? '✓ ' : '✗ ') + message + '</div>';
+            setTimeout(() => div.innerHTML = '', 3000);
+        }
+
+        loadData();
     </script>
 </body>
 </html>
@@ -315,7 +387,8 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; }
+        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
+        .back:hover { background: #555; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
@@ -462,7 +535,8 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; }
+        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
+        .back:hover { background: #555; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
@@ -616,7 +690,8 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; }
+        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
+        .back:hover { background: #555; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
         .rule-item { background: #f9f9f9; padding: 10px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #4CAF50; cursor: move; }
@@ -916,7 +991,8 @@ func (ws *WebServer) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
         button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #45a049; }
         .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; }
+        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
+        .back:hover { background: #555; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
     </style>
