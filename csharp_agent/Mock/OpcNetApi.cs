@@ -216,12 +216,13 @@ namespace OpcNetApi
             OPCBROWSEDIRECTION dwBrowseDirection,
             [MarshalAs(UnmanagedType.LPWStr)] string szString);
 
-        void BrowseOPCItemIDs(
+        [PreserveSig]
+        int BrowseOPCItemIDs(
             OPCBROWSETYPE dwBrowseFilterType,
             [MarshalAs(UnmanagedType.LPWStr)] string szFilterCriteria,
-            [MarshalAs(UnmanagedType.I2)] short vtDataTypeFilter,
-            [MarshalAs(UnmanagedType.I4)] int dwAccessRightsFilter,
-            [Out] out OpcNetApi.Com.IEnumString ppIEnumString);
+            [MarshalAs(UnmanagedType.U2)] short vtDataTypeFilter,
+            [MarshalAs(UnmanagedType.U4)] int dwAccessRightsFilter,
+            [Out, MarshalAs(UnmanagedType.Interface)] out OpcNetApi.Com.IEnumString ppIEnumString);
 
         void GetItemID(
             [MarshalAs(UnmanagedType.LPWStr)] string szItemDataID,
