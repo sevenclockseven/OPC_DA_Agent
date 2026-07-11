@@ -179,30 +179,6 @@ namespace OpcNetApi
     }
 
     /// <summary>
-    /// IEnumGUID - 枚举 GUID
-    /// </summary>
-    [ComImport]
-    [GuidAttribute("0002E000-0000-0000-C000-000000000046")]
-    [InterfaceTypeAttribute(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IEnumGUID
-    {
-        [PreserveSig]
-        int Next(
-            [MarshalAs(UnmanagedType.U4)] int celt,
-            [Out] out Guid rgelt,
-            [Out][MarshalAs(UnmanagedType.U4)] out int pceltFetched);
-
-        [PreserveSig]
-        int Skip([MarshalAs(UnmanagedType.U4)] int celt);
-
-        [PreserveSig]
-        int Reset();
-
-        [PreserveSig]
-        int Clone([Out] out OpcNetApi.Com.IEnumGUID ppenum);
-    }
-
-    /// <summary>
     /// IOPCServer - OPC DA 服务器主接口
     /// </summary>
     [ComImport]
