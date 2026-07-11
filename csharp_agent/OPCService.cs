@@ -2,15 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
-
-using OpcNetApi;
+using OPCAutomation;
 
 namespace OPC_DA_Agent
 {
     public class OPCService : IDisposable
     {
-        private Server _opcServer;
-        private Group _opcGroup;
+        private OPCServer _opcServer;
+        private OPCGroup _opcGroup;
         private List<TagConfig> _tags = new List<TagConfig>();
         private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
@@ -25,12 +24,15 @@ namespace OPC_DA_Agent
         private readonly Config _config;
         private readonly string _configPath;
 
-        /// <summary>配置文件路径，用于保存标签配置</summary>
         public string ConfigPath { get { return _configPath; } }
 
         public bool IsConnected
         {
-            get { return _opcServer != null && _opcServer.IsConnected; }
+            get
+            {
+                try { return _opcServer != null && _opcServer.ServerState == (int)OPCServerState.OPCRunning; }
+                catch { return false; }
+            }
         }
 
         public int TagCount
@@ -60,13 +62,24 @@ namespace OPC_DA_Agent
         {
             try
             {
-                string serverUrl = _config.OpcServerUrl ?? _config.OpcServerProgId;
-                _logger.Info(string.Format("正在连接到OPC服务器: {0}...", serverUrl));
+                _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
 
-                _opcServer = new Server(serverUrl);
-                _opcServer.Connect();
+                _opcServer = new OPCServer();
 
-                _logger.Info("已连接到OPC服务器");
+                // 解析服务器地址
+                string progId = _config.OpcServerProgId;
+                string host = _config.OpcServerHost;
+
+                if (string.IsNullOrEmpty(host) || host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+                {
+                    _opcServer.Connect(progId);
+                }
+                else
+                {
+                    _opcServer.Connect(progId, host);
+                }
+
+                _logger.Info(string.Format("已连接到OPC服务器，LocaleID={0}", _opcServer.LocaleID));
                 return true;
             }
             catch (Exception ex)
@@ -81,7 +94,7 @@ namespace OPC_DA_Agent
         /// </summary>
         public bool Start()
         {
-            if (_opcServer == null || !_opcServer.IsConnected)
+            if (_opcServer == null || _opcServer.ServerState != (int)OPCServerState.OPCRunning)
             {
                 _logger.Error("OPC服务器未连接，无法启动数据采集");
                 return false;
@@ -90,7 +103,15 @@ namespace OPC_DA_Agent
             try
             {
                 int updateRate = _config.UpdateInterval;
-                _opcGroup = _opcServer.CreateGroup("DataGroup", true, updateRate, null, null, null, null);
+
+                OPCGroups groups = _opcServer.OPCGroups;
+                groups.DefaultGroupDeadband = 0;
+                groups.DefaultGroupIsActive = true;
+
+                _opcGroup = groups.Add("DataGroup");
+                _opcGroup.IsActive = true;
+                _opcGroup.IsSubscribed = true;
+                _opcGroup.UpdateRate = updateRate;
 
                 if (_tags.Count > 0)
                 {
@@ -120,22 +141,31 @@ namespace OPC_DA_Agent
                 if (_opcGroup == null) return;
 
                 var itemIds = new List<string>();
+                var clientHandles = new List<int>();
+                int handle = 1;
+
                 foreach (var tag in _tags)
                 {
                     if (tag.Enabled || tag.Active)
                     {
                         itemIds.Add(tag.NodeId);
+                        clientHandles.Add(handle++);
                     }
                 }
 
                 if (itemIds.Count > 0)
                 {
-                    var added = _opcGroup.AddItems(itemIds.ToArray());
-                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", added.Length, itemIds.Count));
+                    object serverHandles;
+                    object errors;
+                    Array opcItems = itemIds.ToArray();
+                    Array clientHandlesArray = clientHandles.ToArray();
+
+                    _opcGroup.OPCItems.AddItems(itemIds.Count, opcItems, clientHandlesArray, out serverHandles, out errors);
+                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
 
                     lock (_lock)
                     {
-                        foreach (string id in added)
+                        foreach (string id in itemIds)
                         {
                             _lastValues[id] = null;
                         }
@@ -171,12 +201,32 @@ namespace OPC_DA_Agent
 
             try
             {
-                var values = _opcGroup.SyncReadAll();
+                int count = _opcGroup.OPCItems.Count;
+                if (count == 0) return;
+
+                Array serverHandles = new object[count + 1];
+                object errors;
+
+                for (int i = 1; i <= count; i++)
+                {
+                    serverHandles.SetValue(i, i);
+                }
+
+                Array values;
+                Array qualities;
+                Array timestamps;
+
+                _opcGroup.SyncRead((short)OPCDataSource.OPC_DEVICE, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
+
                 lock (_lock)
                 {
-                    foreach (var kvp in values)
+                    for (int i = 0; i < count; i++)
                     {
-                        _lastValues[kvp.Key] = kvp.Value;
+                        if (i < _tags.Count)
+                        {
+                            string tagId = _tags[i].NodeId;
+                            _lastValues[tagId] = values.GetValue(i + 1);
+                        }
                     }
                 }
                 _totalReads++;
@@ -231,148 +281,67 @@ namespace OPC_DA_Agent
         /// <summary>
         /// 浏览指定路径下的子节点
         /// </summary>
-        /// <param name="nodeId">节点路径（null 或空字符串表示根节点）</param>
         public List<OPCNode> BrowsePath(string nodeId)
         {
-            if (_opcServer == null || !_opcServer.IsConnected)
+            if (_opcServer == null || _opcServer.ServerState != (int)OPCServerState.OPCRunning)
                 throw new InvalidOperationException("未连接到OPC服务器");
 
             var result = new List<OPCNode>();
             try
             {
-                var browser = (IOPCBrowseServerAddressSpace)_opcServer.ComObject;
+                var browser = _opcServer.OPCBrowser;
 
-                OPCNAMESPACETYPE nsType;
-                browser.QueryOrganization(out nsType);
-                _logger.Info(string.Format("[Browse] 命名空间类型: {0}, 目标节点: {1}", nsType, nodeId ?? "(root)"));
-
-                browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
+                browser.ShowLeafs(true);
+                browser.MoveToRoot();
 
                 if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
                 {
                     string[] parts = nodeId.Split('.');
                     foreach (string part in parts)
                     {
-                        _logger.Info(string.Format("[Browse] OPC_BROWSE_DOWN: {0}", part));
-                        browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_DOWN, part);
+                        browser.MoveDown(part);
                     }
                 }
 
-                OpcNetApi.Com.IEnumString enumBranches;
-                int hrBranch = browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_BRANCH, "", 0, 0, out enumBranches);
-                _logger.Info(string.Format("[Browse] BrowseOPCItemIDs(BRANCH) hr={0}, enum={1}", hrBranch, enumBranches != null ? "ok" : "null"));
-                int branchCount = 0;
-                if (enumBranches != null)
+                browser.ShowBranches();
+                foreach (string branch in browser)
                 {
-                    const int batchSize = 100;
-                    string[] buffer = new string[batchSize];
-                    int fetched;
-                    int hr;
-                    do
+                    if (!string.IsNullOrEmpty(branch))
                     {
-                        hr = enumBranches.Next(batchSize, buffer, out fetched);
-                        branchCount += fetched;
-                        for (int i = 0; i < fetched; i++)
+                        result.Add(new OPCNode
                         {
-                            string itemId = buffer[i];
-                            try
-                            {
-                                string fullId;
-                                browser.GetItemID(buffer[i], out fullId);
-                                itemId = fullId ?? buffer[i];
-                            }
-                            catch { }
-
-                            result.Add(new OPCNode
-                            {
-                                NodeId = itemId,
-                                Name = buffer[i],
-                                Description = "分支",
-                                IsFolder = true,
-                                HasChildren = true,
-                                Children = new List<OPCNode>()
-                            });
-                        }
-                    } while (hr == 0 && fetched == batchSize);
+                            NodeId = branch,
+                            Name = branch,
+                            Description = "分支",
+                            IsFolder = true,
+                            HasChildren = true,
+                            Children = new List<OPCNode>()
+                        });
+                    }
                 }
-                _logger.Info(string.Format("[Browse] 分支节点: {0}", branchCount));
 
-                OpcNetApi.Com.IEnumString enumLeaves;
-                int hrLeaf = browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_LEAF, "", 0, 0, out enumLeaves);
-                _logger.Info(string.Format("[Browse] BrowseOPCItemIDs(LEAF) hr={0}, enum={1}", hrLeaf, enumLeaves != null ? "ok" : "null"));
-                int leafCount = 0;
-                if (enumLeaves != null)
+                browser.ShowLeafs(true);
+                foreach (string leaf in browser)
                 {
-                    const int batchSize = 100;
-                    string[] buffer = new string[batchSize];
-                    int fetched;
-                    int hr;
-                    do
+                    if (!string.IsNullOrEmpty(leaf))
                     {
-                        hr = enumLeaves.Next(batchSize, buffer, out fetched);
-                        leafCount += fetched;
-                        for (int i = 0; i < fetched; i++)
+                        string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
+                        result.Add(new OPCNode
                         {
-                            string itemId = buffer[i];
-                            try
-                            {
-                                string fullId;
-                                browser.GetItemID(buffer[i], out fullId);
-                                itemId = fullId ?? buffer[i];
-                            }
-                            catch { }
-
-                            result.Add(new OPCNode
-                            {
-                                NodeId = itemId,
-                                Name = buffer[i],
-                                Description = "标签",
-                                IsFolder = false,
-                                HasChildren = false,
-                                Children = null
-                            });
-                        }
-                    } while (hr == 0 && fetched == batchSize);
+                            NodeId = fullId,
+                            Name = leaf,
+                            Description = "标签",
+                            IsFolder = false,
+                            HasChildren = false,
+                            Children = null
+                        });
+                    }
                 }
-                _logger.Info(string.Format("[Browse] 叶子节点: {0}, 总计: {1}", leafCount, result.Count));
             }
             catch (Exception ex)
             {
                 _logger.Error(string.Format("[Browse] 浏览节点失败: {0}", nodeId ?? "(root)"), ex);
             }
-
-            return result;
-        }
-
-        /// <summary>
-        /// 调用 BrowseOPCItemIDs 并枚举返回的字符串
-        /// </summary>
-        private List<string> BrowseItems(IOPCBrowseServerAddressSpace browser, OPCBROWSETYPE browseType)
-        {
-            var result = new List<string>();
-
-            OpcNetApi.Com.IEnumString enumString;
-            browser.BrowseOPCItemIDs(
-                browseType,
-                "",      // 无过滤条件
-                0,       // 不限数据类型
-                0,       // 不限访问权限
-                out enumString);
-
-            if (enumString == null) return result;
-
-            const int batchSize = 100;
-            string[] buffer = new string[batchSize];
-            int fetched;
-
-            do
-            {
-                enumString.Next(batchSize, buffer, out fetched);
-                for (int i = 0; i < fetched; i++)
-                {
-                    result.Add(buffer[i]);
-                }
-            } while (fetched == batchSize);
 
             return result;
         }
@@ -386,7 +355,7 @@ namespace OPC_DA_Agent
             {
                 if (_opcGroup != null)
                 {
-                    _opcGroup.RemoveAllItems();
+                    _opcGroup.OPCItems.RemoveAll();
                 }
 
                 _tags = newTags;
@@ -423,12 +392,12 @@ namespace OPC_DA_Agent
             Stop();
             if (_opcGroup != null)
             {
-                _opcGroup.Dispose();
+                try { _opcServer.OPCGroups.Remove("DataGroup"); } catch { }
                 _opcGroup = null;
             }
             if (_opcServer != null)
             {
-                _opcServer.Dispose();
+                try { _opcServer.Disconnect(); } catch { }
                 _opcServer = null;
             }
         }
