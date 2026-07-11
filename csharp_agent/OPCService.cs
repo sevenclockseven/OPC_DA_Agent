@@ -244,16 +244,15 @@ namespace OPC_DA_Agent
                 OPCNAMESPACETYPE nsType;
                 browser.QueryOrganization(out nsType);
 
-                string currentPos;
-                if (string.IsNullOrEmpty(nodeId) || nodeId == "Root")
+                browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
+
+                if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
                 {
-                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
-                    currentPos = "";
-                }
-                else
-                {
-                    browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, nodeId);
-                    currentPos = nodeId;
+                    string[] parts = nodeId.Split('.');
+                    foreach (string part in parts)
+                    {
+                        browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_DOWN, part);
+                    }
                 }
 
                 // 浏览分支（文件夹）
