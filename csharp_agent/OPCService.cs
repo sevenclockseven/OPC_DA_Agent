@@ -144,8 +144,8 @@ namespace OPC_DA_Agent
                 {
                     Array opcItems = itemIds.ToArray();
                     Array handlesArray = clientHandles.ToArray();
-                    object serverHandles;
-                    object errors;
+                    Array serverHandles;
+                    Array errors;
 
                     _opcGroup.OPCItems.AddItems(itemIds.Count, opcItems, handlesArray, out serverHandles, out errors);
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
@@ -185,15 +185,14 @@ namespace OPC_DA_Agent
                 int count = _opcGroup.OPCItems.Count;
                 if (count == 0) return;
 
-                object serverHandles = new object[count + 1];
-                object errors;
-
+                Array serverHandles = new object[count + 1];
                 for (int i = 1; i <= count; i++)
                 {
-                    ((Array)serverHandles).SetValue(i, i);
+                    serverHandles.SetValue(i, i);
                 }
 
-                object values;
+                Array values;
+                Array errors;
                 object qualities;
                 object timestamps;
 
@@ -261,22 +260,31 @@ namespace OPC_DA_Agent
             var result = new List<OPCNode>();
             try
             {
-                dynamic browser = _opcServer.OPCBrowser;
+                Type serverType = _opcServer.GetType();
+                object browser = serverType.InvokeMember("OPCBrowser",
+                    System.Reflection.BindingFlags.GetProperty | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+                    null, _opcServer, null);
 
-                browser.ShowBranches();
-                browser.MoveToRoot();
+                if (browser == null)
+                {
+                    _logger.Error("[Browse] 未找到 OPCBrowser 属性");
+                    return result;
+                }
+
+                dynamic dynBrowser = browser;
+                dynBrowser.MoveToRoot();
 
                 if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
                 {
                     string[] parts = nodeId.Split('.');
                     foreach (string part in parts)
                     {
-                        browser.MoveDown(part);
+                        dynBrowser.MoveDown(part);
                     }
                 }
 
-                browser.ShowBranches();
-                IEnumerator branchEnum = ((IEnumerable)browser).GetEnumerator();
+                dynBrowser.ShowBranches();
+                IEnumerator branchEnum = ((IEnumerable)dynBrowser).GetEnumerator();
                 while (branchEnum.MoveNext())
                 {
                     string branch = branchEnum.Current as string;
@@ -294,8 +302,8 @@ namespace OPC_DA_Agent
                     }
                 }
 
-                browser.ShowLeafs(true);
-                IEnumerator leafEnum = ((IEnumerable)browser).GetEnumerator();
+                dynBrowser.ShowLeafs(true);
+                IEnumerator leafEnum = ((IEnumerable)dynBrowser).GetEnumerator();
                 while (leafEnum.MoveNext())
                 {
                     string leaf = leafEnum.Current as string;
@@ -333,12 +341,12 @@ namespace OPC_DA_Agent
                         int count = _opcGroup.OPCItems.Count;
                         if (count > 0)
                         {
-                            object handles = new object[count + 1];
+                            Array handles = new object[count + 1];
                             for (int i = 1; i <= count; i++)
                             {
-                                ((Array)handles).SetValue(i, i);
+                                handles.SetValue(i, i);
                             }
-                            object errors;
+                            Array errors;
                             _opcGroup.OPCItems.Remove(count, ref handles, out errors);
                         }
                     }
