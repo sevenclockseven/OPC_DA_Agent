@@ -3,13 +3,14 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
+using OPCAutomation;
 
 namespace OPC_DA_Agent
 {
     public class OPCService : IDisposable
     {
-        private dynamic _opcServer;
-        private dynamic _opcGroup;
+        private OPCServer _opcServer;
+        private OPCGroup _opcGroup;
         private List<TagConfig> _tags = new List<TagConfig>();
         private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
@@ -64,14 +65,7 @@ namespace OPC_DA_Agent
             {
                 _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
 
-                Type serverType = Type.GetTypeFromProgID("OPCAutomation.OPCServer");
-                if (serverType == null)
-                {
-                    _logger.Error("找不到 OPCAutomation.OPCServer，请确保 OPCDAAuto.dll 已注册");
-                    return false;
-                }
-
-                _opcServer = Activator.CreateInstance(serverType);
+                _opcServer = new OPCServer();
 
                 string host = _config.OpcServerHost;
                 if (!string.IsNullOrEmpty(host) && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
@@ -108,7 +102,7 @@ namespace OPC_DA_Agent
             {
                 int updateRate = _config.UpdateInterval;
 
-                dynamic groups = _opcServer.OPCGroups;
+                OPCGroups groups = _opcServer.OPCGroups;
                 groups.DefaultGroupDeadband = 0;
                 groups.DefaultGroupIsActive = true;
 
@@ -159,12 +153,10 @@ namespace OPC_DA_Agent
 
                 if (itemIds.Count > 0)
                 {
-                    Array opcItems = itemIds.ToArray();
-                    Array handlesArray = clientHandles.ToArray();
                     object serverHandles;
                     object errors;
 
-                    _opcGroup.OPCItems.AddItems(itemIds.Count, ref opcItems, ref handlesArray, out serverHandles, out errors);
+                    _opcGroup.OPCItems.AddItems(itemIds.Count, itemIds.ToArray(), clientHandles.ToArray(), out serverHandles, out errors);
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", itemIds.Count, _tags.Count));
 
                     lock (_lock)
@@ -208,30 +200,27 @@ namespace OPC_DA_Agent
                 int count = _opcGroup.OPCItems.Count;
                 if (count == 0) return;
 
-                Array serverHandles = new int[count + 1];
+                Array serverHandles = new object[count + 1];
                 for (int i = 1; i <= count; i++)
                 {
                     serverHandles.SetValue(i, i);
                 }
 
-                object values;
+                Array values;
+                Array qualities;
+                Array timestamps;
                 object errors;
-                object qualities;
-                object timestamps;
 
                 _opcGroup.SyncRead(2, count, ref serverHandles, out values, out errors, out qualities, out timestamps);
 
                 lock (_lock)
                 {
-                    if (values is Array valArray)
+                    for (int i = 0; i < count; i++)
                     {
-                        for (int i = 1; i <= count; i++)
+                        if (i < _tags.Count)
                         {
-                            if (i - 1 < _tags.Count)
-                            {
-                                string tagId = _tags[i - 1].NodeId;
-                                _lastValues[tagId] = valArray.GetValue(i);
-                            }
+                            string tagId = _tags[i].NodeId;
+                            _lastValues[tagId] = values.GetValue(i + 1);
                         }
                     }
                 }
@@ -295,7 +284,7 @@ namespace OPC_DA_Agent
             var result = new List<OPCNode>();
             try
             {
-                dynamic browser = _opcServer.OPCBrowser;
+                var browser = _opcServer.OPCBrowser;
 
                 browser.MoveToRoot();
 
@@ -365,7 +354,7 @@ namespace OPC_DA_Agent
                         int count = _opcGroup.OPCItems.Count;
                         if (count > 0)
                         {
-                            Array handles = new int[count + 1];
+                            Array handles = new object[count + 1];
                             for (int i = 1; i <= count; i++)
                             {
                                 handles.SetValue(i, i);
@@ -411,12 +400,12 @@ namespace OPC_DA_Agent
             Stop();
             if (_opcGroup != null)
             {
-                try { ((dynamic)_opcServer).OPCGroups.Remove("DataGroup"); } catch { }
+                try { _opcServer.OPCGroups.Remove("DataGroup"); } catch { }
                 _opcGroup = null;
             }
             if (_opcServer != null)
             {
-                try { ((dynamic)_opcServer).Disconnect(); } catch { }
+                try { _opcServer.Disconnect(); } catch { }
                 _opcServer = null;
             }
         }
