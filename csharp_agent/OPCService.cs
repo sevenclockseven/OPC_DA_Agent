@@ -64,10 +64,10 @@ namespace OPC_DA_Agent
             {
                 _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
 
-                Type serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
+                Type serverType = Type.GetTypeFromProgID("OPCAutomation.OPCServer");
                 if (serverType == null)
                 {
-                    _logger.Error(string.Format("找不到OPC服务器ProgID: {0}", _config.OpcServerProgId));
+                    _logger.Error("找不到 OPCAutomation.OPCServer，请确保 OPCDAAuto.dll 已注册");
                     return false;
                 }
 
