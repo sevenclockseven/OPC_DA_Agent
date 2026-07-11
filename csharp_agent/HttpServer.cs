@@ -130,7 +130,6 @@ namespace OPC_DA_Agent
             HttpListenerRequest request = context.Request;
             HttpListenerResponse response = context.Response;
 
-            response.ContentType = "application/json; charset=utf-8";
             response.Headers.Add("Access-Control-Allow-Origin", "*");
             response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
             response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
@@ -149,40 +148,49 @@ namespace OPC_DA_Agent
                 string query = request.Url.Query;
 
                 byte[] buffer = null;
+                bool isHtml = false;
 
                 // === API 路由 ===
                 if (path == "/api/status" && method == "GET")
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.SuccessResponse(_opcService.GetStatus()));
                 }
                 else if (path == "/api/data" && method == "GET")
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.SuccessResponse(_opcService.GetData()));
                 }
                 else if (path == "/api/tags" && method == "GET")
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.SuccessResponse(_opcService.GetTags()));
                 }
                 else if (path == "/api/tags" && method == "POST")
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     buffer = HandleSaveTags(request);
                 }
                 else if (path == "/api/browse" && method == "GET")
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.SuccessResponse(_opcService.GetBrowseRoot()));
                 }
                 else if (path == "/api/browse/node" && method == "GET")
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     string nodeId = ExtractQuery(query, "nodeId");
                     buffer = Json(ApiResponse.SuccessResponse(_opcService.BrowsePath(nodeId)));
                 }
                 // === Web UI ===
                 else if ((path == "/" || path == "/index.html") && method == "GET")
                 {
+                    response.ContentType = "text/html; charset=utf-8";
                     buffer = Html(GetWebUI());
                 }
                 else
                 {
+                    response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.ErrorResponse("未找到的接口: " + path));
                     response.StatusCode = 404;
                 }
