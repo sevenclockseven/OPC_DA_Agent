@@ -101,10 +101,11 @@ namespace OPC_DA_Agent
             const int batch = 100;
             string[] buf = new string[batch];
             int fetched;
+            int hr;
 
             do
             {
-                enumStr.Next(batch, buf, out fetched);
+                hr = enumStr.Next(batch, buf, out fetched);
                 for (int i = 0; i < fetched; i++)
                 {
                     string itemId = buf[i];
@@ -126,7 +127,7 @@ namespace OPC_DA_Agent
                         Children = isFolder ? new List<OPCNode>() : null
                     });
                 }
-            } while (fetched == batch);
+            } while (hr == 0 && fetched == batch);
 
             return result;
         }

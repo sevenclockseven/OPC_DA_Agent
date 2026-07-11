@@ -243,7 +243,7 @@ namespace OPC_DA_Agent
 
                 OPCNAMESPACETYPE nsType;
                 browser.QueryOrganization(out nsType);
-                _logger.Info(string.Format("OPC命名空间类型: {0}", nsType));
+                _logger.Info(string.Format("[Browse] 命名空间类型: {0}, 目标节点: {1}", nsType, nodeId ?? "(root)"));
 
                 browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_TO, "");
 
@@ -252,96 +252,90 @@ namespace OPC_DA_Agent
                     string[] parts = nodeId.Split('.');
                     foreach (string part in parts)
                     {
+                        _logger.Info(string.Format("[Browse] OPC_BROWSE_DOWN: {0}", part));
                         browser.ChangeBrowsePosition(OPCBROWSEDIRECTION.OPC_BROWSE_DOWN, part);
                     }
                 }
 
-                var branches = BrowseItems(browser, OPCBROWSETYPE.OPC_BRANCH);
-                _logger.Info(string.Format("分支节点数: {0}", branches.Count));
-
-                if (branches.Count == 0)
+                OpcNetApi.Com.IEnumString enumBranches;
+                browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_BRANCH, "", 0, 0, out enumBranches);
+                int branchCount = 0;
+                if (enumBranches != null)
                 {
-                    _logger.Info("OPC_BRANCH返回空，尝试OPC_FLAT");
-                    var flatItems = BrowseItems(browser, OPCBROWSETYPE.OPC_FLAT);
-                    _logger.Info(string.Format("OPC_FLAT返回: {0}项", flatItems.Count));
-
-                    foreach (string name in flatItems)
+                    const int batchSize = 100;
+                    string[] buffer = new string[batchSize];
+                    int fetched;
+                    int hr;
+                    do
                     {
-                        string itemId = name;
-                        try
+                        hr = enumBranches.Next(batchSize, buffer, out fetched);
+                        branchCount += fetched;
+                        for (int i = 0; i < fetched; i++)
                         {
-                            string fullId;
-                            browser.GetItemID(name, out fullId);
-                            itemId = fullId ?? name;
-                        }
-                        catch { }
+                            string itemId = buffer[i];
+                            try
+                            {
+                                string fullId;
+                                browser.GetItemID(buffer[i], out fullId);
+                                itemId = fullId ?? buffer[i];
+                            }
+                            catch { }
 
-                        result.Add(new OPCNode
-                        {
-                            NodeId = itemId,
-                            Name = name,
-                            Description = "标签",
-                            IsFolder = false,
-                            HasChildren = false,
-                            Children = null
-                        });
-                    }
+                            result.Add(new OPCNode
+                            {
+                                NodeId = itemId,
+                                Name = buffer[i],
+                                Description = "分支",
+                                IsFolder = true,
+                                HasChildren = true,
+                                Children = new List<OPCNode>()
+                            });
+                        }
+                    } while (hr == 0 && fetched == batchSize);
                 }
-                else
+                _logger.Info(string.Format("[Browse] 分支节点: {0}", branchCount));
+
+                OpcNetApi.Com.IEnumString enumLeaves;
+                browser.BrowseOPCItemIDs(OPCBROWSETYPE.OPC_LEAF, "", 0, 0, out enumLeaves);
+                int leafCount = 0;
+                if (enumLeaves != null)
                 {
-                    foreach (string name in branches)
+                    const int batchSize = 100;
+                    string[] buffer = new string[batchSize];
+                    int fetched;
+                    int hr;
+                    do
                     {
-                        string itemId = name;
-                        try
+                        hr = enumLeaves.Next(batchSize, buffer, out fetched);
+                        leafCount += fetched;
+                        for (int i = 0; i < fetched; i++)
                         {
-                            string fullId;
-                            browser.GetItemID(name, out fullId);
-                            itemId = fullId ?? name;
+                            string itemId = buffer[i];
+                            try
+                            {
+                                string fullId;
+                                browser.GetItemID(buffer[i], out fullId);
+                                itemId = fullId ?? buffer[i];
+                            }
+                            catch { }
+
+                            result.Add(new OPCNode
+                            {
+                                NodeId = itemId,
+                                Name = buffer[i],
+                                Description = "标签",
+                                IsFolder = false,
+                                HasChildren = false,
+                                Children = null
+                            });
                         }
-                        catch { }
-
-                        result.Add(new OPCNode
-                        {
-                            NodeId = itemId,
-                            Name = name,
-                            Description = "分支",
-                            IsFolder = true,
-                            HasChildren = true,
-                            Children = new List<OPCNode>()
-                        });
-                    }
-
-                    var leaves = BrowseItems(browser, OPCBROWSETYPE.OPC_LEAF);
-                    _logger.Info(string.Format("叶子节点数: {0}", leaves.Count));
-
-                    foreach (string name in leaves)
-                    {
-                        string itemId = name;
-                        try
-                        {
-                            string fullId;
-                            browser.GetItemID(name, out fullId);
-                            itemId = fullId ?? name;
-                        }
-                        catch { }
-
-                        result.Add(new OPCNode
-                        {
-                            NodeId = itemId,
-                            Name = name,
-                            Description = "标签",
-                            IsFolder = false,
-                            HasChildren = false,
-                            Children = null
-                        });
-                    }
+                    } while (hr == 0 && fetched == batchSize);
                 }
-
-                _logger.Info(string.Format("浏览完成，共返回{0}个节点", result.Count));
+                _logger.Info(string.Format("[Browse] 叶子节点: {0}, 总计: {1}", leafCount, result.Count));
             }
             catch (Exception ex)
             {
-                _logger.Error(string.Format("浏览节点失败: {0}", nodeId ?? "(root)"), ex);
+                _logger.Error(string.Format("[Browse] 浏览节点失败: {0}", nodeId ?? "(root)"), ex);
             }
 
             return result;

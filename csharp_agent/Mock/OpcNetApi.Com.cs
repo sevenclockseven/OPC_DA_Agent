@@ -13,8 +13,8 @@ namespace OpcNetApi.Com
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IEnumString
     {
-        /// <summary>读取指定数量的字符串</summary>
-        void Next(
+        [PreserveSig]
+        int Next(
             [MarshalAs(UnmanagedType.I4)] int celt,
             [Out][MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPWStr, SizeParamIndex = 0)] string[] rgelt,
             [Out][MarshalAs(UnmanagedType.I4)] out int pceltFetched);
