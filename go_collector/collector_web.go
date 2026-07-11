@@ -38,8 +38,9 @@ func (ws *WebServer) Start(port int) error {
 	// Web页面
 	r.HandleFunc("/", ws.handleHome).Methods("GET")
 	r.HandleFunc("/web/config", ws.handleConfigPage).Methods("GET")
-	r.HandleFunc("/web/mqtt", ws.handleMqttPage).Methods("GET")
 	r.HandleFunc("/web/http", ws.handleHttpPage).Methods("GET")
+	r.HandleFunc("/web/mqtt", ws.handleMqttPage).Methods("GET")
+	r.HandleFunc("/web/rtdb", ws.handleRtdbPage).Methods("GET")
 	r.HandleFunc("/web/transform", ws.handleTransformPage).Methods("GET")
 	r.HandleFunc("/web/webhook", ws.handleWebhookPage).Methods("GET")
 
@@ -92,12 +93,12 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
                 <p>查看和编辑主配置</p>
             </a>
             <a href="/web/mqtt" class="menu-item">
-                <h3>📡 MQTT配置</h3>
-                <p>配置MQTT服务器</p>
+                <h3>📡 MQTT输出</h3>
+                <p>配置MQTT发布</p>
             </a>
-            <a href="/web/http" class="menu-item">
-                <h3>🌐 HTTP配置</h3>
-                <p>配置HTTP服务器</p>
+            <a href="/web/rtdb" class="menu-item">
+                <h3>💾 RTDB输出</h3>
+                <p>配置实时库输出</p>
             </a>
             <a href="/web/transform" class="menu-item">
                 <h3>🔄 键名转换</h3>
@@ -463,6 +464,116 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
 	ws.renderHTML(w, tmpl)
 }
 
+func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RTDB配置 - OPC DA Collector</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+        button:hover { background: #45a049; }
+        .back { background: #666; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💾 RTDB输出配置</h1>
+        <a href="/" class="back">← 返回首页</a>
+
+        <form id="rtdbForm">
+            <div class="form-group">
+                <label>启用RTDB输出</label>
+                <select id="enabled" name="enabled">
+                    <option value="false">否</option>
+                    <option value="true">是</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>输出格式</label>
+                <select id="format" name="format">
+                    <option value="{key},{value},{quality},{timestamp}">CSV: key,value,quality,timestamp</option>
+                    <option value="json">JSON格式</option>
+                    <option value="custom">自定义格式</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>自定义格式模板</label>
+                <textarea id="custom_format" name="custom_format" rows="3" placeholder="例如: {key},{value},{quality},{timestamp}"></textarea>
+            </div>
+
+            <button type="button" onclick="saveRtdb()">💾 保存配置</button>
+        </form>
+
+        <div id="result" style="margin-top: 20px;"></div>
+    </div>
+
+    <script>
+        async function loadRtdb() {
+            const response = await fetch('/api/config');
+            const data = await response.json();
+            if (data.success && data.data.rtdb) {
+                const rtdb = data.data.rtdb;
+                document.getElementById('enabled').value = rtdb.enabled?.toString() || 'false';
+                const format = rtdb.format || '{key},{value},{quality},{timestamp}';
+                if (format === '{key},{value},{quality},{timestamp}') {
+                    document.getElementById('format').value = '{key},{value},{quality},{timestamp}';
+                } else if (format === 'json') {
+                    document.getElementById('format').value = 'json';
+                } else {
+                    document.getElementById('format').value = 'custom';
+                    document.getElementById('custom_format').value = format;
+                }
+            }
+        }
+
+        async function saveRtdb() {
+            let format = document.getElementById('format').value;
+            if (format === 'custom') {
+                format = document.getElementById('custom_format').value;
+            }
+
+            const rtdb = {
+                enabled: document.getElementById('enabled').value === 'true',
+                format: format
+            };
+
+            const response = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rtdb })
+            });
+
+            const result = await response.json();
+            showResult(result);
+        }
+
+        function showResult(result) {
+            const div = document.getElementById('result');
+            if (result.success) {
+                div.innerHTML = '<div class="success">✓ ' + (result.message || '操作成功') + '</div>';
+            } else {
+                div.innerHTML = '<div class="error">✗ ' + (result.message || '操作失败') + '</div>';
+            }
+        }
+
+        loadRtdb();
+    </script>
+</body>
+</html>
+	`
+	ws.renderHTML(w, tmpl)
+}
+
 func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
 <!DOCTYPE html>
@@ -508,14 +619,6 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                     <option value="POST">POST</option>
                     <option value="GET">GET</option>
                 </select>
-            </div>
-            <div class="form-group">
-                <label>用户名（可选）</label>
-                <input type="text" id="username" name="username" placeholder="用户名">
-            </div>
-            <div class="form-group">
-                <label>密码（可选）</label>
-                <input type="password" id="password" name="password" placeholder="密码">
             </div>
             <div class="form-group">
                 <label>超时时间（毫秒）</label>
