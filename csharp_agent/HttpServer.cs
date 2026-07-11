@@ -145,6 +145,8 @@ namespace OPC_DA_Agent
                 string method = request.HttpMethod;
                 string query = request.Url.Query;
 
+                _logger.Info(string.Format("[HTTP] {0} {1}{2}", method, path, query));
+
                 byte[] buffer = null;
                 bool isHtml = false;
 
@@ -172,7 +174,18 @@ namespace OPC_DA_Agent
                 else if (path == "/api/browse" && method == "GET")
                 {
                     response.ContentType = "application/json; charset=utf-8";
-                    buffer = Json(ApiResponse.SuccessResponse(_opcService.GetBrowseRoot()));
+                    _logger.Info("[HTTP] 调用 GetBrowseRoot");
+                    try
+                    {
+                        var data = _opcService.GetBrowseRoot();
+                        _logger.Info(string.Format("[HTTP] GetBrowseRoot 返回 {0} 个节点", data.Count));
+                        buffer = Json(ApiResponse.SuccessResponse(data));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error("[HTTP] GetBrowseRoot 失败", ex);
+                        buffer = Json(ApiResponse.ErrorResponse("浏览失败: " + ex.Message));
+                    }
                 }
                 else if (path == "/api/browse/node" && method == "GET")
                 {
