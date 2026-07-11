@@ -643,8 +643,12 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         .back { background: #666; }
         .success { color: green; font-weight: bold; }
         .error { color: red; font-weight: bold; }
-        .rule-item { background: #f9f9f9; padding: 10px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #4CAF50; }
+        .rule-item { background: #f9f9f9; padding: 10px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #4CAF50; cursor: move; }
+        .rule-item.dragging { opacity: 0.5; border-left-color: #2196F3; }
+        .rule-item.drag-over { border-top: 2px solid #2196F3; }
         .preview { background: #e3f2fd; padding: 15px; border-radius: 6px; margin-top: 20px; }
+        .rule-buttons { display: inline-block; margin-left: 10px; }
+        .rule-buttons button { padding: 4px 8px; margin-right: 5px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -726,15 +730,73 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
 
             let html = '';
             rules.forEach((rule, index) => {
-                html += '<div class="rule-item">' +
-                    '<strong>' + rule.rule_type + '</strong>' +
+                html += '<div class="rule-item" draggable="true" data-index="' + index + '"' +
+                    ' ondragstart="onDragStart(event)" ondragover="onDragOver(event)"' +
+                    ' ondragenter="onDragEnter(event)" ondragleave="onDragLeave(event)"' +
+                    ' ondrop="onDrop(event)" ondragend="onDragEnd(event)">' +
+                    '<strong>#' + (index + 1) + ' ' + rule.rule_type + '</strong>' +
                     (rule.pattern ? ' | 模式: ' + rule.pattern : '') +
                     (rule.replacement ? ' | 替换: ' + rule.replacement : '') +
                     (rule.description ? ' | ' + rule.description : '') +
-                    '<button onclick="removeRule(' + index + ')" style="background: #f44336; margin-left: 10px;">删除</button>' +
-                    '</div>';
+                    '<span class="rule-buttons">' +
+                    (index > 0 ? '<button onclick="moveRule(' + index + ', -1)" style="background: #2196F3;">↑</button>' : '') +
+                    (index < rules.length - 1 ? '<button onclick="moveRule(' + index + ', 1)" style="background: #2196F3;">↓</button>' : '') +
+                    '<button onclick="removeRule(' + index + ')" style="background: #f44336;">删除</button>' +
+                    '</span></div>';
             });
             container.innerHTML = html;
+        }
+
+        let draggedIndex = null;
+
+        function onDragStart(e) {
+            draggedIndex = parseInt(e.target.dataset.index);
+            e.target.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function onDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+
+        function onDragEnter(e) {
+            e.preventDefault();
+            e.target.closest('.rule-item')?.classList.add('drag-over');
+        }
+
+        function onDragLeave(e) {
+            e.target.closest('.rule-item')?.classList.remove('drag-over');
+        }
+
+        function onDrop(e) {
+            e.preventDefault();
+            const targetItem = e.target.closest('.rule-item');
+            if (!targetItem) return;
+            const targetIndex = parseInt(targetItem.dataset.index);
+            
+            if (draggedIndex !== null && draggedIndex !== targetIndex) {
+                const item = rules.splice(draggedIndex, 1)[0];
+                rules.splice(targetIndex, 0, item);
+                renderRules();
+            }
+            
+            targetItem.classList.remove('drag-over');
+        }
+
+        function onDragEnd(e) {
+            e.target.classList.remove('dragging');
+            document.querySelectorAll('.rule-item').forEach(el => el.classList.remove('drag-over'));
+            draggedIndex = null;
+        }
+
+        function moveRule(index, direction) {
+            const newIndex = index + direction;
+            if (newIndex < 0 || newIndex >= rules.length) return;
+            
+            const item = rules.splice(index, 1)[0];
+            rules.splice(newIndex, 0, item);
+            renderRules();
         }
 
         function addRule() {
