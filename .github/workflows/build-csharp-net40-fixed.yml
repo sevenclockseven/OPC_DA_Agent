@@ -24,7 +24,7 @@ jobs:
     - name: Register OPC Automation Type Library
       shell: pwsh
       run: |
-        $dllPath = Resolve-Path "csharp_agent\OPCDAAuto.dll"
+        $dllPath = (Resolve-Path "csharp_agent\OPCDAAuto.dll").Path
         Write-Host "Registering type library: $dllPath"
         $code = @"
         using System;
@@ -38,15 +38,28 @@ jobs:
                 int hr = LoadTypeLibEx(args[0], REGKIND_REGISTER, out tlb);
                 if (hr == 0) Console.WriteLine("OK");
                 else Console.WriteLine("FAILED: 0x" + hr.ToString("X8"));
+                // Verify
+                try {
+                    var t = Type.GetTypeFromProgID("OPCAutomation.OPCServer");
+                    Console.WriteLine("Verify: " + (t != null ? "FOUND" : "NOT FOUND"));
+                } catch (Exception ex) {
+                    Console.WriteLine("Verify error: " + ex.Message);
+                }
             }
         }
         "@
+        # 用 32 位编译和运行（OPCDAAuto.dll 是 32 位）
         $csFile = "$env:TEMP\regtlb.cs"
-        $exeFile = "$env:TEMP\regtlb.exe"
+        $exeFile = "$env:TEMP\regtlb32.exe"
         Set-Content -Path $csFile -Value $code -Encoding UTF8
-        & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /out:$exeFile $csFile 2>&1
+        & "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe" /out:$exeFile /platform:x86 $csFile 2>&1
         & $exeFile $dllPath 2>&1
-        if ($LASTEXITCODE -ne 0) { Write-Host "Registration may have failed, but continuing..."; }
+        Write-Host "32-bit registration done"
+        # 也用 64 位注册一次
+        $exeFile64 = "$env:TEMP\regtlb64.exe"
+        & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /out:$exeFile64 /platform:x64 $csFile 2>&1
+        & $exeFile64 $dllPath 2>&1
+        Write-Host "64-bit registration done"
 
     - name: Create working copy
       run: |
