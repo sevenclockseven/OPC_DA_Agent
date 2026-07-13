@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<asmv1:assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:asmv1="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity name="OPC_DA_Agent.exe" version="1.0.0.0" type="win32" />
+  <file name="OPCDAAuto.dll">
+    <typelib tlbid="{28E68F91-8D75-11D1-8DC3-3C302A000000}" version="1.0" helpdir="" />
+    <comClass clsid="{28E68F9A-8D75-11D1-8DC3-3C302A000000}" threadingModel="Both" progid="OPCAutomation.OPCServer" />
+    <comClass clsid="{28E68F9B-8D75-11D1-8DC3-3C302A000000}" threadingModel="Both" progid="OPCAutomation.OPCServer.1" />
+  </file>
+</asmv1:assembly>
