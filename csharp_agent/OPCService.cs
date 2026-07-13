@@ -290,13 +290,19 @@ namespace OPC_DA_Agent
                     }
                 }
 
+                // 根命名空间可能是超大的扁平结构，逐个 COM 枚举很慢；加时间预算保证响应及时返回，
+                // 同时分支（文件夹）优先，保证导航可用
                 const int maxBrowseNodes = 5000;
+                const int browseTimeBudgetMs = 3000;
+                DateTime browseStart = DateTime.Now;
                 bool truncated = false;
 
                 browser.ShowBranches();
                 foreach (string branch in browser)
                 {
                     if (string.IsNullOrEmpty(branch)) continue;
+                    if (result.Count >= maxBrowseNodes) { truncated = true; break; }
+                    if ((DateTime.Now - browseStart).TotalMilliseconds > browseTimeBudgetMs) { truncated = true; break; }
                     string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? branch : nodeId + "." + branch;
                     result.Add(new OPCNode
                     {
@@ -307,28 +313,31 @@ namespace OPC_DA_Agent
                         HasChildren = true,
                         Children = new List<OPCNode>()
                     });
-                    if (result.Count >= maxBrowseNodes) { truncated = true; break; }
                 }
 
                 // Flat=true 会把整棵树的全部叶子摊平返回（数量可达数万），树形浏览只取当前节点的直接叶子
-                browser.ShowLeafs(false);
-                foreach (string leaf in browser)
+                if (!truncated)
                 {
-                    if (string.IsNullOrEmpty(leaf)) continue;
-                    if (result.Count >= maxBrowseNodes) { truncated = true; break; }
-                    string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
-                    string itemId = null;
-                    try { itemId = browser.GetItemID(leaf); } catch { }
-                    result.Add(new OPCNode
+                    browser.ShowLeafs(false);
+                    foreach (string leaf in browser)
                     {
-                        NodeId = fullId,
-                        Name = leaf,
-                        ItemId = itemId,
-                        Description = "标签",
-                        IsFolder = false,
-                        HasChildren = false,
-                        Children = null
-                    });
+                        if (string.IsNullOrEmpty(leaf)) continue;
+                        if (result.Count >= maxBrowseNodes) { truncated = true; break; }
+                        if ((DateTime.Now - browseStart).TotalMilliseconds > browseTimeBudgetMs) { truncated = true; break; }
+                        string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
+                        string itemId = null;
+                        try { itemId = browser.GetItemID(leaf); } catch { }
+                        result.Add(new OPCNode
+                        {
+                            NodeId = fullId,
+                            Name = leaf,
+                            ItemId = itemId,
+                            Description = "标签",
+                            IsFolder = false,
+                            HasChildren = false,
+                            Children = null
+                        });
+                    }
                 }
 
                 if (truncated)
