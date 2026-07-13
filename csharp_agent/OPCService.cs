@@ -276,7 +276,17 @@ namespace OPC_DA_Agent
                     string[] parts = nodeId.Split('.');
                     foreach (string part in parts)
                     {
-                        browser.MoveDown(part);
+                        // 标签（点号）可能出现在任意层级，并非所有节点都是可下钻的文件夹；
+                        // MoveDown 失败时停留在已到达的最深位置，避免 E_FAIL 导致整体失败
+                        try
+                        {
+                            browser.MoveDown(part);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Warn(string.Format("[Browse] 无法下钻到分支 {0}（可能是该层级的标签，非文件夹），停在当前位置: {1}", part, ex.Message));
+                            break;
+                        }
                     }
                 }
 
@@ -287,9 +297,10 @@ namespace OPC_DA_Agent
                 foreach (string branch in browser)
                 {
                     if (string.IsNullOrEmpty(branch)) continue;
+                    string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? branch : nodeId + "." + branch;
                     result.Add(new OPCNode
                     {
-                        NodeId = branch,
+                        NodeId = fullId,
                         Name = branch,
                         Description = "分支",
                         IsFolder = true,
@@ -306,10 +317,13 @@ namespace OPC_DA_Agent
                     if (string.IsNullOrEmpty(leaf)) continue;
                     if (result.Count >= maxBrowseNodes) { truncated = true; break; }
                     string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
+                    string itemId = null;
+                    try { itemId = browser.GetItemID(leaf); } catch { }
                     result.Add(new OPCNode
                     {
                         NodeId = fullId,
                         Name = leaf,
+                        ItemId = itemId,
                         Description = "标签",
                         IsFolder = false,
                         HasChildren = false,

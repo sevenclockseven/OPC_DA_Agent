@@ -260,6 +260,9 @@ namespace OPC_DA_Agent
         [JsonProperty("name")]
         public string Name { get; set; }
 
+        [JsonProperty("item_id")]
+        public string ItemId { get; set; }
+
         [JsonProperty("description")]
         public string Description { get; set; }
 
