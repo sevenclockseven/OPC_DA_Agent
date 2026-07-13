@@ -12,7 +12,7 @@ namespace OPC_DA_Agent
     {
         private IOPCAutoServer _opcServer;
         private IOPCGroups _opcGroups;
-        private IOPCGroup _opcGroup;
+        private OPCGroup _opcGroup;
         private OPCItems _opcItems;
 
         private List<TagConfig> _tags = new List<TagConfig>();
@@ -25,6 +25,11 @@ namespace OPC_DA_Agent
         private Array _errors;
         private int _cancelId;
         private int _transactionId = 1;
+
+        // SSE 推送：已连接的流式客户端 + clientHandle→nodeId 映射
+        private readonly List<StreamWriter> _sseClients = new List<StreamWriter>();
+        private readonly object _sseLock = new object();
+        private List<string> _clientHandleNodes = new List<string>();
 
         private long _totalReads = 0;
         private long _totalErrors = 0;
@@ -160,7 +165,7 @@ namespace OPC_DA_Agent
                 _opcGroups.DefaultGroupDeadband = 0;
                 _opcGroups.DefaultGroupIsActive = true;
 
-                _opcGroup = (IOPCGroup)_opcGroups.Add("DataGroup");
+                _opcGroup = (OPCGroup)_opcGroups.Add("DataGroup");
                 _opcGroup.IsActive = true;
                 _opcGroup.IsSubscribed = true;
                 _opcGroup.UpdateRate = _config.UpdateInterval;
@@ -172,7 +177,7 @@ namespace OPC_DA_Agent
                     ApplyTags();
                 }
 
-                _updateTimer = new Timer(OnUpdateTimer, null, 0, _config.UpdateInterval);
+                _opcGroup.DataChange += OnDataChange;
                 _isRunning = true;
 
                 _logger.Info("OPC数据采集已启动");
@@ -216,6 +221,8 @@ namespace OPC_DA_Agent
                         out serverHandles, out errors, null, null);
                     _serverHandles = serverHandles;
 
+                    _clientHandleNodes = clientHandles;
+
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", opcItemIDs.Count - 1, _tags.Count));
 
                     lock (_lock)
@@ -228,6 +235,29 @@ namespace OPC_DA_Agent
                             }
                         }
                     }
+
+                    // 首读一次填充当前值，避免订阅首包到达前 /api/data 为空
+                    try
+                    {
+                        int count = _opcItems.Count;
+                        for (int i = 1; i <= count; i++)
+                        {
+                            try
+                            {
+                                OPCItem item = _opcItems.Item(i);
+                                object v, q, t;
+                                item.Read(2, out v, out q, out t);
+                                if (i - 1 < _clientHandleNodes.Count && !string.IsNullOrEmpty(_clientHandleNodes[i]))
+                                    _lastValues[_clientHandleNodes[i]] = v;
+                            }
+                            catch { }
+                        }
+                        _logger.Info("OPC 标签初始值读取完成");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn("OPC 标签初始值读取失败（将由订阅推送补齐）: " + ex.Message);
+                    }
                 }
             }
             catch (Exception ex)
@@ -239,46 +269,110 @@ namespace OPC_DA_Agent
         public void Stop()
         {
             _isRunning = false;
+            if (_opcGroup != null)
+            {
+                try { _opcGroup.DataChange -= OnDataChange; } catch { }
+            }
             if (_updateTimer != null)
             {
                 _updateTimer.Dispose();
                 _updateTimer = null;
             }
+            lock (_sseLock)
+            {
+                foreach (var w in _sseClients)
+                {
+                    try { w.Dispose(); } catch { }
+                }
+                _sseClients.Clear();
+            }
             _logger.Info("OPC数据采集已停止");
         }
 
-        private void OnUpdateTimer(object state)
+        private void OnDataChange(int transactionId, int numItems, ref Array clientHandles,
+            ref Array itemValues, ref Array qualities, ref Array timeStamps)
         {
-            if (!_isRunning || _opcItems == null) return;
-
             try
             {
-                int count = _opcItems.Count;
-                if (count == 0) return;
-
-                _opcGroup.AsyncRead(count, ref _serverHandles, out _errors, _transactionId++, out _cancelId);
-
-                lock (_lock)
+                var changed = new List<TagValue>();
+                for (int i = 0; i < numItems; i++)
                 {
-                    var enabledTags = _tags.FindAll(t => t.Enabled || t.Active);
-                    for (int i = 0; i < count && i < enabledTags.Count; i++)
+                    int handle = 0;
+                    try { handle = Convert.ToInt32(clientHandles.GetValue(i)); } catch { }
+                    if (handle < 0 || handle >= _clientHandleNodes.Count) continue;
+                    string nodeId = _clientHandleNodes[handle];
+                    if (string.IsNullOrEmpty(nodeId)) continue;
+
+                    object value = itemValues.GetValue(i);
+                    int q = 0;
+                    try { q = Convert.ToInt32(qualities.GetValue(i)); } catch { }
+                    string qualityStr = (q & 0xC0) == 0xC0 ? "Good" : "Bad";
+                    DateTime timestamp = timeStamps.GetValue(i) is DateTime ? (DateTime)timeStamps.GetValue(i) : DateTime.Now;
+
+                    lock (_lock)
                     {
-                        try
-                        {
-                            OPCItem item = _opcItems.Item(i + 1);
-                            object value, quality, timestamp;
-                            item.Read(2, out value, out quality, out timestamp);
-                            _lastValues[enabledTags[i].NodeId] = value;
-                        }
-                        catch { }
+                        _lastValues[nodeId] = value;
                     }
+                    changed.Add(new TagValue
+                    {
+                        Key = nodeId,
+                        Value = value,
+                        Quality = qualityStr,
+                        Timestamp = timestamp,
+                        Status = qualityStr,
+                        DataType = value == null ? null : value.GetType().Name,
+                        NodeId = nodeId,
+                        Name = nodeId
+                    });
                 }
-                _totalReads++;
+
+                if (changed.Count > 0)
+                {
+                    System.Threading.Interlocked.Increment(ref _totalReads);
+                    BroadcastSse(changed);
+                }
             }
             catch (Exception ex)
             {
-                _totalErrors++;
-                _logger.Error("更新数据时发生错误", ex);
+                System.Threading.Interlocked.Increment(ref _totalErrors);
+                _logger.Error("处理 OPC 数据变更失败", ex);
+            }
+        }
+
+        public void AddSseClient(StreamWriter writer)
+        {
+            lock (_sseLock) _sseClients.Add(writer);
+        }
+
+        public void RemoveSseClient(StreamWriter writer)
+        {
+            lock (_sseLock) _sseClients.Remove(writer);
+        }
+
+        private void BroadcastSse(List<TagValue> values)
+        {
+            var payload = JsonConvert.SerializeObject(new { ts = DateTime.Now, values = values });
+            var line = "data: " + payload + "\n\n";
+            List<StreamWriter> dead = null;
+            lock (_sseLock)
+            {
+                foreach (var w in _sseClients)
+                {
+                    try
+                    {
+                        w.Write(line);
+                        w.Flush();
+                    }
+                    catch
+                    {
+                        if (dead == null) dead = new List<StreamWriter>();
+                        dead.Add(w);
+                    }
+                }
+                if (dead != null)
+                {
+                    foreach (var d in dead) _sseClients.Remove(d);
+                }
             }
         }
 

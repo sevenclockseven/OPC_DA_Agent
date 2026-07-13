@@ -339,7 +339,7 @@ func (cm *ConfigManager) CreateTemplate(templateType string) *AppConfig {
 				{
 					Name:    "数据源1",
 					Enabled: true,
-					Url:     "http://172.16.32.98:8080/api/data",
+					Url:     "http://172.16.32.98:8080/api/stream",
 					Method:  "POST",
 					Timeout: 30000,
 				},
@@ -373,7 +373,7 @@ func (cm *ConfigManager) CreateTemplate(templateType string) *AppConfig {
 				{
 					Name:    "数据源1",
 					Enabled: false,
-					Url:     "http://172.16.32.98:8080/api/data",
+					Url:     "http://172.16.32.98:8080/api/stream",
 					Method:  "POST",
 					Timeout: 30000,
 				},

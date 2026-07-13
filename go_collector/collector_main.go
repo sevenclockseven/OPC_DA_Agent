@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -230,7 +231,20 @@ func (c *Collector) Reload(newConfig *AppConfig) {
 }
 
 func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {
+	// 数据源 URL 含 /api/stream 时走 SSE 订阅推送，否则保持原有定时轮询
+	if tr.task.HttpSource != "" {
+		for _, client := range collector.httpClients {
+			if client.config.Name == tr.task.HttpSource && strings.Contains(client.config.Url, "/api/stream") {
+				tr.runSse(ctx, collector, client)
+				return
+			}
+		}
+	}
+
 	interval := time.Duration(tr.task.JobIntervalSecond) * time.Second
+	if interval <= 0 {
+		interval = time.Second
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -242,6 +256,113 @@ func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {
 			tr.collectData(collector)
 		}
 	}
+}
+
+func (tr *TaskRunner) runSse(ctx context.Context, collector *Collector, client *HttpClient) {
+	backoff := time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		streamURL := client.config.Url
+		log.Printf("SSE 连接 %s", streamURL)
+		req, err := http.NewRequest("GET", streamURL, nil)
+		if err != nil {
+			log.Printf("SSE 请求创建失败: %v", err)
+			time.Sleep(backoff)
+			continue
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("SSE 连接失败: %v", err)
+			time.Sleep(backoff)
+			backoff = minDuration(backoff*2, 30*time.Second)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			log.Printf("SSE 返回状态码 %d", resp.StatusCode)
+			time.Sleep(backoff)
+			backoff = minDuration(backoff*2, 30*time.Second)
+			continue
+		}
+		backoff = time.Second
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				resp.Body.Close()
+				return
+			default:
+			}
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data:") {
+				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if payload != "" {
+					tr.handleSsePayload(collector, payload)
+				}
+			}
+		}
+		log.Printf("SSE 连接断开: %v", scanner.Err())
+		resp.Body.Close()
+		time.Sleep(backoff)
+		backoff = minDuration(backoff*2, 30*time.Second)
+	}
+}
+
+func (tr *TaskRunner) handleSsePayload(collector *Collector, payload string) {
+	var envelope struct {
+		Ts     string                   `json:"ts"`
+		Values []map[string]interface{} `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
+		log.Printf("SSE 报文解析失败: %v", err)
+		return
+	}
+	if len(envelope.Values) == 0 {
+		return
+	}
+
+	rawData := make([]map[string]interface{}, 0, len(envelope.Values))
+	for _, v := range envelope.Values {
+		rawData = append(rawData, map[string]interface{}{
+			"topic":   v["key"],
+			"value":   v["value"],
+			"quality": qualityToInt(v["quality"]),
+		})
+	}
+	tr.processAndPublish(collector, rawData)
+}
+
+func qualityToInt(q interface{}) int {
+	switch v := q.(type) {
+	case string:
+		if v == "Good" {
+			return 192
+		}
+		return 0
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	}
+	return 0
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (tr *TaskRunner) collectData(collector *Collector) {
@@ -280,6 +401,10 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 		return
 	}
 
+	tr.processAndPublish(collector, rawData)
+}
+
+func (tr *TaskRunner) processAndPublish(collector *Collector, rawData []map[string]interface{}) {
 	values := make(map[string]interface{})
 	metadata := make(map[string]map[string]interface{})
 

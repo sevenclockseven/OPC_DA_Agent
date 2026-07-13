@@ -160,6 +160,11 @@ namespace OPC_DA_Agent
                     response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.SuccessResponse(_opcService.GetData()));
                 }
+                else if (path == "/api/stream" && method == "GET")
+                {
+                    HandleStream(response, _opcService);
+                    return;
+                }
                 else if (path == "/api/tags" && method == "GET")
                 {
                     response.ContentType = "application/json; charset=utf-8";
@@ -304,6 +309,50 @@ namespace OPC_DA_Agent
         private byte[] Html(string html)
         {
             return Encoding.UTF8.GetBytes(html);
+        }
+
+        private void HandleStream(HttpListenerResponse response, OPCService opcService)
+        {
+            response.ContentType = "text/event-stream";
+            response.SendChunked = true;
+            response.Headers.Add("Cache-Control", "no-cache");
+
+            var sw = new StreamWriter(response.OutputStream, new System.Text.UTF8Encoding(false));
+            opcService.AddSseClient(sw);
+            try
+            {
+                sw.Write("retry: 3000\n\n");
+                sw.Flush();
+                _logger.Info("[SSE] 客户端已连接");
+                var heartbeat = DateTime.Now;
+                while (_isRunning)
+                {
+                    Thread.Sleep(1000);
+                    if ((DateTime.Now - heartbeat).TotalSeconds > 15)
+                    {
+                        try
+                        {
+                            sw.Write(": ping\n\n");
+                            sw.Flush();
+                            heartbeat = DateTime.Now;
+                        }
+                        catch
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 客户端断开，由 finally 清理
+            }
+            finally
+            {
+                opcService.RemoveSseClient(sw);
+                try { sw.Dispose(); } catch { }
+                _logger.Info("[SSE] 客户端已断开");
+            }
         }
 
         private string GetWebUI()
