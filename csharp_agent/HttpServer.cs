@@ -134,10 +134,12 @@ namespace OPC_DA_Agent
 
             if (request.HttpMethod == "OPTIONS")
             {
-                response.StatusCode = 200;
-                response.Close();
+                SendResponse(response, null, 200);
                 return;
             }
+
+            byte[] buffer = null;
+            int statusCode = 200;
 
             try
             {
@@ -146,9 +148,6 @@ namespace OPC_DA_Agent
                 string query = request.Url.Query;
 
                 _logger.Info(string.Format("[HTTP] {0} {1}{2}", method, path, query));
-
-                byte[] buffer = null;
-                bool isHtml = false;
 
                 // === API 路由 ===
                 if (path == "/api/status" && method == "GET")
@@ -203,26 +202,44 @@ namespace OPC_DA_Agent
                 {
                     response.ContentType = "application/json; charset=utf-8";
                     buffer = Json(ApiResponse.ErrorResponse("未找到的接口: " + path));
-                    response.StatusCode = 404;
+                    statusCode = 404;
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("处理HTTP请求时发生错误", ex);
+                statusCode = 500;
+                buffer = Json(ApiResponse.ErrorResponse("内部服务器错误: " + ex.Message));
+            }
 
+            SendResponse(response, buffer, statusCode);
+        }
+
+        // 统一写出响应：客户端在传输中途断开（HttpListenerException）或响应已部分提交（InvalidOperationException）
+        // 都属于正常边界情况，吞掉二次异常，避免污染日志与后续请求处理
+        private void SendResponse(HttpListenerResponse response, byte[] buffer, int statusCode)
+        {
+            try
+            {
+                response.StatusCode = statusCode;
                 if (buffer != null)
                 {
                     response.ContentLength64 = buffer.Length;
                     response.OutputStream.Write(buffer, 0, buffer.Length);
                 }
             }
-            catch (Exception ex)
+            catch (HttpListenerException)
             {
-                _logger.Error("处理HTTP请求时发生错误", ex);
-                response.StatusCode = 500;
-                byte[] errorBuf = Json(ApiResponse.ErrorResponse("内部服务器错误: " + ex.Message));
-                response.ContentLength64 = errorBuf.Length;
-                response.OutputStream.Write(errorBuf, 0, errorBuf.Length);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
             }
             finally
             {
-                response.OutputStream.Close();
+                try { response.OutputStream.Close(); } catch { }
             }
         }
 
