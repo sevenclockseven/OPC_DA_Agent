@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using OPCAutomation;
 
@@ -30,6 +31,15 @@ namespace OPC_DA_Agent
         private readonly Logger _logger;
         private readonly Config _config;
         private readonly string _configPath;
+
+        // 浏览结果按节点缓存，避免翻页时反复 COM 枚举（单次可达 3 秒）
+        private readonly Dictionary<string, BrowseCacheEntry> _browseCache =
+            new Dictionary<string, BrowseCacheEntry>(StringComparer.OrdinalIgnoreCase);
+        private class BrowseCacheEntry
+        {
+            public List<OPCNode> Nodes;
+            public DateTime Time;
+        }
 
         public string ConfigPath { get { return _configPath; } }
 
@@ -351,6 +361,45 @@ namespace OPC_DA_Agent
             return result;
         }
 
+        public BrowseResult BrowsePaged(string nodeId, int offset, int limit)
+        {
+            string key = nodeId ?? "Root";
+            List<OPCNode> all;
+            lock (_lock)
+            {
+                if (_browseCache.TryGetValue(key, out var entry) &&
+                    (DateTime.Now - entry.Time).TotalSeconds < 30)
+                {
+                    all = entry.Nodes;
+                }
+                else
+                {
+                    try
+                    {
+                        all = BrowsePath(nodeId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn(string.Format("[Browse] 分页枚举失败 (nodeId={0}): {1}", key, ex.Message));
+                        all = new List<OPCNode>();
+                    }
+                    _browseCache[key] = new BrowseCacheEntry { Nodes = all, Time = DateTime.Now };
+                }
+            }
+
+            if (limit <= 0) limit = 50;
+            if (offset < 0) offset = 0;
+            var nodes = all.Skip(offset).Take(limit).ToList();
+            return new BrowseResult
+            {
+                Nodes = nodes,
+                Total = all.Count,
+                Offset = offset,
+                Limit = limit,
+                HasMore = offset + limit < all.Count
+            };
+        }
+
         public void UpdateTags(List<TagConfig> newTags)
         {
             lock (_lock)
@@ -403,6 +452,7 @@ namespace OPC_DA_Agent
         public void Dispose()
         {
             Stop();
+            _browseCache.Clear();
             if (_opcGroup != null)
             {
                 try { _opcGroups.Remove("DataGroup"); } catch { }

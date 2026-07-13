@@ -173,11 +173,13 @@ namespace OPC_DA_Agent
                 else if (path == "/api/browse" && method == "GET")
                 {
                     response.ContentType = "application/json; charset=utf-8";
+                    int offset = ParseInt(ExtractQuery(query, "offset"), 0);
+                    int limit = ParseInt(ExtractQuery(query, "limit"), 50);
                     _logger.Info("[HTTP] 调用 GetBrowseRoot");
                     try
                     {
-                        var data = _opcService.GetBrowseRoot();
-                        _logger.Info(string.Format("[HTTP] GetBrowseRoot 返回 {0} 个节点", data.Count));
+                        var data = _opcService.BrowsePaged(null, offset, limit);
+                        _logger.Info(string.Format("[HTTP] GetBrowseRoot 返回 {0}/{1} 个节点", data.Nodes.Count, data.Total));
                         buffer = Json(ApiResponse.SuccessResponse(data));
                     }
                     catch (Exception ex)
@@ -190,7 +192,18 @@ namespace OPC_DA_Agent
                 {
                     response.ContentType = "application/json; charset=utf-8";
                     string nodeId = ExtractQuery(query, "nodeId");
-                    buffer = Json(ApiResponse.SuccessResponse(_opcService.BrowsePath(nodeId)));
+                    int offset = ParseInt(ExtractQuery(query, "offset"), 0);
+                    int limit = ParseInt(ExtractQuery(query, "limit"), 50);
+                    try
+                    {
+                        var data = _opcService.BrowsePaged(nodeId, offset, limit);
+                        buffer = Json(ApiResponse.SuccessResponse(data));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Error("[HTTP] BrowsePath 失败", ex);
+                        buffer = Json(ApiResponse.ErrorResponse("浏览失败: " + ex.Message));
+                    }
                 }
                 // === Web UI ===
                 else if ((path == "/" || path == "/index.html") && method == "GET")
@@ -274,6 +287,12 @@ namespace OPC_DA_Agent
                     return Uri.UnescapeDataString(kv[1]);
             }
             return null;
+        }
+
+        private int ParseInt(string s, int def)
+        {
+            int v;
+            return int.TryParse(s, out v) ? v : def;
         }
 
         private byte[] Json(ApiResponse apiResponse)
