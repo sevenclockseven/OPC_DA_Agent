@@ -19,7 +19,12 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
 .children{margin-left:20px;display:none}
 .children.open{display:block}
 .btn{padding:8px 20px;border:none;border-radius:8px;background:#cba6f7;color:#1e1e2e;font-weight:bold;cursor:pointer;margin:8px 0}
-.btn:hover{background:#b4befe}
+  .btn:hover{background:#b4befe}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .pager{display:flex;align-items:center;gap:8px;margin:12px 4px;padding-top:10px;border-top:1px solid #45475a}
+  .pager .info{color:#6c7086;font-size:13px}
+  .manual-row{display:flex;gap:8px;margin:8px 0}
+  .manual-row input{flex:1;min-width:0}
 .tag-list{list-style:none;margin:8px 0}
 .tag-item{padding:6px 12px;background:#313244;border-radius:6px;margin:4px 0;display:flex;justify-content:space-between;align-items:center}
 .tag-remove{color:#f38ba8;cursor:pointer;font-weight:bold}
@@ -34,11 +39,15 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     <button class="btn" id="btnBrowse" type="button">浏览根节点</button>
     <div id="tree"></div>
   </div>
-  <div class="right">
-    <h2>已选标签</h2>
-    <button class="btn" id="btnSave" type="button">保存并应用</button>
-    <ul class="tag-list" id="tagList"></ul>
-  </div>
+    <div class="right">
+      <h2>已选标签</h2>
+      <div class="manual-row">
+        <input id="manualInput" placeholder="手动输入 OPC 点号 ItemID" />
+        <button class="btn" id="btnManual" type="button">添加</button>
+      </div>
+      <button class="btn" id="btnSave" type="button">保存并应用</button>
+      <ul class="tag-list" id="tagList"></ul>
+    </div>
 </div>
 <div class="status-bar" id="statusBar">连接中...</div>
 <script>
@@ -65,19 +74,20 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     x.send(data ? JSON.stringify(data) : null);
   }
 
+  var PAGE_SIZE = 50;
+
   function loadRoot() {
     document.getElementById('tree').innerHTML = '<p>加载中...</p>';
-    api('/api/browse', 'GET', null, function(r) {
-      if (r.success) renderTree('tree', r.data);
-      else document.getElementById('tree').innerHTML = '<p style="color:#f38ba8">错误: ' + r.message + '</p>';
-    });
+    loadContainer('tree', null, 0, PAGE_SIZE);
   }
 
-  function renderTree(parentId, nodes) {
+  function renderTree(parentId, result, nodeId) {
     var parent = document.getElementById(parentId);
     if (!parent) return;
     parent.innerHTML = '';
-    if (!nodes || nodes.length === 0) {
+    parent.dataset.nodeId = nodeId || '';
+    var nodes = result.nodes || [];
+    if (!nodes.length) {
       parent.innerHTML = '<p style="color:#6c7086">（无子节点）</p>';
       return;
     }
@@ -93,7 +103,6 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
         var childrenDiv = document.createElement('div');
         childrenDiv.id = childId;
         childrenDiv.className = 'children';
-        div.appendChild(childrenDiv);
 
         (function(node, cId) {
           nodeDiv.onclick = function() {
@@ -101,12 +110,15 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
               childrenDiv.classList.remove('open');
             } else {
               if (!childrenDiv.dataset.loaded) {
-                loadChildren(cId, node.node_id);
+                loadContainer(cId, node.node_id, 0, PAGE_SIZE);
               }
               childrenDiv.classList.add('open');
             }
           };
         })(n, childId);
+
+        div.appendChild(nodeDiv);
+        div.appendChild(childrenDiv);
       } else {
         (function(node) {
           nodeDiv.onclick = function() {
@@ -114,21 +126,57 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
             nodeDiv.classList.toggle('selected');
           };
         })(n);
+        div.appendChild(nodeDiv);
       }
 
-      div.appendChild(nodeDiv);
       parent.appendChild(div);
     });
+    renderPager(parentId, result, nodeId);
   }
 
-  function loadChildren(containerId, nodeId) {
+  function renderPager(parentId, result, nodeId) {
+    var parent = document.getElementById(parentId);
+    if (!parent) return;
+    var bar = document.createElement('div');
+    bar.className = 'pager';
+    var total = result.total || 0;
+    var offset = result.offset || 0;
+    var limit = result.limit || PAGE_SIZE;
+    var page = Math.floor(offset / limit) + 1;
+    var pages = Math.max(1, Math.ceil(total / limit));
+
+    var prev = document.createElement('button');
+    prev.className = 'btn';
+    prev.textContent = '‹ 上一页';
+    prev.disabled = offset <= 0;
+    prev.onclick = function() { loadContainer(parentId, nodeId, Math.max(0, offset - limit), limit); };
+
+    var info = document.createElement('span');
+    info.className = 'info';
+    info.textContent = '第 ' + page + ' / ' + pages + ' 页（共 ' + total + '）';
+
+    var next = document.createElement('button');
+    next.className = 'btn';
+    next.textContent = '下一页 ›';
+    next.disabled = !result.has_more;
+    next.onclick = function() { loadContainer(parentId, nodeId, offset + limit, limit); };
+
+    bar.appendChild(prev);
+    bar.appendChild(info);
+    bar.appendChild(next);
+    parent.appendChild(bar);
+  }
+
+  function loadContainer(containerId, nodeId, offset, limit) {
     var container = document.getElementById(containerId);
     if (!container) return;
     container.innerHTML = '<p style="color:#6c7086">加载中...</p>';
-    var url = '/api/browse/node?nodeId=' + encodeURIComponent(nodeId);
+    var url = nodeId
+      ? ('/api/browse/node?nodeId=' + encodeURIComponent(nodeId) + '&offset=' + offset + '&limit=' + limit)
+      : ('/api/browse?offset=' + offset + '&limit=' + limit);
     api(url, 'GET', null, function(r) {
-      if (r.success) { renderTree(containerId, r.data); container.dataset.loaded = '1'; }
-      else container.innerHTML = '<p style="color:#f38ba8">' + r.message + '</p>';
+      if (r.success) { renderTree(containerId, r.data, nodeId); container.dataset.loaded = '1'; }
+      else container.innerHTML = '<p style="color:#f38ba8">' + (r.message || '错误') + '</p>';
     });
   }
 
@@ -163,6 +211,17 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
 
   function removeTag(id) { delete selected[id]; renderTagList(); }
 
+  function addManual() {
+    var inp = document.getElementById('manualInput');
+    var val = (inp.value || '').trim();
+    if (!val) { alert('请输入 OPC 点号（ItemID）'); return; }
+    if (!selected[val]) {
+      selected[val] = { node_id: val, name: val, description: '', data_type: '', enabled: true, active: true };
+      renderTagList();
+    }
+    inp.value = '';
+  }
+
   function saveTags() {
     var keys = Object.keys(selected);
     if (keys.length === 0) { alert('请先选择标签'); return; }
@@ -189,6 +248,10 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
 
   document.getElementById('btnBrowse').onclick = loadRoot;
   document.getElementById('btnSave').onclick = saveTags;
+  document.getElementById('btnManual').onclick = addManual;
+  document.getElementById('manualInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); addManual(); }
+  });
 
   loadRoot();
   loadStatus();

@@ -283,6 +283,27 @@ namespace OPC_DA_Agent
     }
 
     /// <summary>
+    /// 分页浏览结果（/api/browse 与 /api/browse/node 返回）。
+    /// </summary>
+    public class BrowseResult
+    {
+        [JsonProperty("nodes")]
+        public List<OPCNode> Nodes { get; set; } = new List<OPCNode>();
+
+        [JsonProperty("total")]
+        public int Total { get; set; }
+
+        [JsonProperty("offset")]
+        public int Offset { get; set; }
+
+        [JsonProperty("limit")]
+        public int Limit { get; set; }
+
+        [JsonProperty("has_more")]
+        public bool HasMore { get; set; }
+    }
+
+    /// <summary>
     /// OPC节点详细信息
     /// </summary>
     public class OPCNodeDetail
