@@ -233,9 +233,7 @@ namespace OPC_DA_Agent
             }
             catch (InvalidOperationException)
             {
-            }
-            catch (ObjectDisposedException)
-            {
+                // 同时覆盖 ObjectDisposedException（其基类为 InvalidOperationException）
             }
             finally
             {
