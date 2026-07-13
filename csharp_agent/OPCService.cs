@@ -18,13 +18,9 @@ namespace OPC_DA_Agent
         private List<TagConfig> _tags = new List<TagConfig>();
         private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
-        private bool _isRunning;
         private object _lock = new object();
 
         private Array _serverHandles;
-        private Array _errors;
-        private int _cancelId;
-        private int _transactionId = 1;
 
         // SSE 推送：已连接的流式客户端 + clientHandle→nodeId 映射
         private readonly List<StreamWriter> _sseClients = new List<StreamWriter>();
@@ -178,7 +174,6 @@ namespace OPC_DA_Agent
                 }
 
                 _opcGroup.DataChange += OnDataChange;
-                _isRunning = true;
 
                 _logger.Info("OPC数据采集已启动");
                 return true;
@@ -198,16 +193,19 @@ namespace OPC_DA_Agent
 
                 var opcItemIDs = new List<string>();
                 var clientHandles = new List<int>();
+                var nodeByHandle = new List<string>();
 
                 opcItemIDs.Add("");
                 clientHandles.Add(0);
+                nodeByHandle.Add("");   // 句柄 0 为占位
 
                 foreach (var tag in _tags)
                 {
                     if (tag.Enabled || tag.Active)
                     {
                         opcItemIDs.Add(tag.NodeId);
-                        clientHandles.Add(opcItemIDs.Count);
+                        clientHandles.Add(opcItemIDs.Count - 1);  // 句柄 = 1-based 项索引
+                        nodeByHandle.Add(tag.NodeId);
                     }
                 }
 
@@ -221,7 +219,7 @@ namespace OPC_DA_Agent
                         out serverHandles, out errors, null, null);
                     _serverHandles = serverHandles;
 
-                    _clientHandleNodes = clientHandles;
+                    _clientHandleNodes = nodeByHandle;
 
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", opcItemIDs.Count - 1, _tags.Count));
 
@@ -268,7 +266,6 @@ namespace OPC_DA_Agent
 
         public void Stop()
         {
-            _isRunning = false;
             if (_opcGroup != null)
             {
                 try { _opcGroup.DataChange -= OnDataChange; } catch { }

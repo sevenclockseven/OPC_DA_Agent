@@ -1,194 +1,113 @@
 # OPC DA 数据采集系统
 
-完整的 OPC DA 数据采集解决方案，支持 Windows 和 Linux 平台。
+OPC DA（OPC DA 2.0）转 HTTP/SSE 的数据采集方案：
 
-## 📁 项目结构
+- **Windows 代理（C# .NET Framework 4.0，x86）** 连接 OPC DA 服务器，通过订阅（DataChange）实时获取数据，并以 SSE 把变化推送给采集器。
+- **Linux 采集器（Go）** 消费 SSE 流（或兼容的 HTTP 轮询），经 `transform.json` 做键名映射后转发到 MQTT / HTTP。
+
+## 架构
+
+```
+OPC DA 服务器 (如 ABB Freelance2000)
+      │ OPC DA 协议（订阅 / DataChange 推送）
+      ▼
+Windows 代理 (C# .NET 4.0, x86)
+      │ HTTP 控制/配置 + SSE (/api/stream) 实时推送
+      ▼
+Linux 采集器 (Go)
+      │ MQTT / HTTP 转发（transform.json 键名映射）
+      ▼
+MQTT Broker / 下游系统
+```
+
+设计要点（第一性原则）：
+
+- OPC DA 原生就是“订阅-推送”模型（DataChange 回调），不应在 C# 侧用定时器轮询、再让 Go 侧定时拉取。双轮询会丢失变化瞬间并增加延迟。
+- C# 代理只做“OPC DA → HTTP/SSE”的适配桥，不内置 MQTT；数据面用 SSE 单向推流，Go 采集器负责真正的转发与协议适配。
+- 标签选择持久化在独立的 `tags.json`，与 `config.json` 解耦，便于导入/导出与迁移。
+
+## 目录结构
 
 ```
 OPC_DA_Agent/
-├── go_collector/          # Go 采集器（Linux）
-│   ├── collector_main.go
+├── csharp_agent/              # Windows 代理 (C# .NET 4.0，必须 x86 编译)
+│   ├── Program.cs
+│   ├── Config.cs
+│   ├── Logger.cs
+│   ├── DataModel.cs
+│   ├── HttpServer.cs          # HTTP 路由 + SSE 端点
+│   ├── OPCService.cs          # OPC 连接 / 浏览 / 订阅推送
+│   ├── OPC_DA_Agent.csproj
+│   ├── App.config / packages.config
+│   ├── Interop.OPCAutomation.dll   # 32 位互操作程序集 (CLSID 28E68F9A...)
+│   ├── OPCDAAuto.dll               # OPC Automation COM 服务器二进制
+│   └── web/index.html              # 浏览 / 选点 / 手动添加 / 导入导出 Web UI
+├── go_collector/              # Linux 采集器 (Go)
+│   ├── collector_main.go      # 入口；自动识别 SSE 流 vs HTTP 轮询
 │   ├── ConfigManager.go
 │   ├── collector_web.go
 │   ├── KeyTransformer.go
 │   ├── Types.go
 │   ├── go.mod
-│   ├── go.sum
-│   ├── collector.ini
-│   ├── transform.json
-│   ├── build_collector.bat
-│   ├── build_collector.sh
-│   └── README.md
-│
-├── csharp_agent/          # C# 代理（Windows）
-│   ├── Program.cs
-│   ├── Config.cs
-│   ├── Logger.cs
-│   ├── DataModel.cs
-│   ├── HttpServer.cs
-│   ├── OPCService.cs
-│   ├── OPCBrowser.cs
-│   ├── OPC_DA_Agent.csproj
-│   ├── App.config
-│   ├── packages.config
-│   ├── build.bat
-│   └── README.md
-│
-├── docs/                  # 文档（放在各子目录中）
-│   ├── AGENTS.md          # AI 开发指南
-│   ├── BROWSE_API.md
-│   ├── COLLECTOR_CONFIG.md
-│   ├── FILE_INDEX.md
-│   ├── KEY_VALUE_FORMAT.md
-│   ├── OPC_DA_REAL_FORMAT.md
-│   └── OPC_DA_SETUP_GUIDE.md
-│
-├── bin/                   # 编译输出（自动生成）
-│   ├── go_collector.exe    # Linux 采集器可执行文件
-│   └── windows_agent.exe  # Windows 代理可执行文件
-│
-└── README.md             # 本文件
+│   └── build_collector.sh
+├── docs/                      # 详细文档
+└── README.md
 ```
 
-## 🚀 快速开始
+## 快速开始
 
 ### Windows 代理（C#）
 
 ```batch
-# 编译
 cd csharp_agent
-msbuild OPC_DA_Agent.csproj /p:Configuration=Release
+msbuild OPC_DA_Agent.csproj /p:Configuration=Release /p:Platform=x86
 
-# 运行
 cd bin\Release
 OPC_DA_Agent.exe --config config.json
 ```
 
-**Web API**: http://localhost:8080/api/
+Web UI: `http://<ip>:8080/`（浏览 OPC 节点、选点、手动添加 ItemID、导入/导出标签）
+
+> 必须 x86 编译：OPC Automation 的 CLSID `{28E68F9A-8D75-11D1-8DC3-3C302A000000}` 是 32 位进程内 COM，64 位进程在 64 位系统下看不到 WOW6432Node 中注册的它，会报 `REGDB_E_CLASSNOTREG (0x80040154)`。
 
 ### Linux 采集器（Go）
 
 ```bash
-# 编译
 cd go_collector
-./build_collector.sh
-
-# 或交叉编译（在 Windows 上）
-./build_collector.bat
-
-# 运行
-./collector --config collector.ini --web-port 9090
-```
-
-**Web 界面**: http://localhost:9090/
-
-## 📖 详细文档
-
-### Go 采集器
-参见 [docs/COLLECTOR_CONFIG.md](docs/COLLECTOR_CONFIG.md)
-
-### C# 代理
-参见 [docs/BROWSE_API.md](docs/BROWSE_API.md)
-
-### 开发者文档
-- [AGENTS.md](AGENTS.md) - AI 开发指南
-- [BROWSE_API.md](docs/BROWSE_API.md) - 浏览 API 文档
-- [COLLECTOR_CONFIG.md](docs/COLLECTOR_CONFIG.md) - 采集器配置
-- [FILE_INDEX.md](docs/FILE_INDEX.md) - 文件索引
-
-## 🔧 编译命令
-
-### C# Windows 代理
-```batch
-# 使用构建脚本
-cd csharp_agent
-build.bat
-
-# 或直接使用 MSBuild
-msbuild OPC_DA_Agent.csproj /p:Configuration=Release
-```
-
-### Go Linux 采集器
-```bash
-# 使用构建脚本
-cd go_collector
-./build_collector.sh
-
-# 或直接使用 go build
 go build -o collector collector_main.go ConfigManager.go collector_web.go KeyTransformer.go Types.go
-```
 
-## 🧪 测试
-
-### 测试 Go 采集器
-```bash
-cd go_collector
 ./collector --config collector.ini --web-port 9090
 ```
 
-### 测试 C# 代理
-```batch
-cd csharp_agent
-msbuild OPC_DA_Agent.csproj /p:Configuration=Debug
-cd bin\Debug
-OPC_DA_Agent.exe
+Web UI: `http://<ip>:9090/`
+
+## 配置
+
+### config.json（C# 代理）
+
+```json
+{
+  "opc_server_prog_id": "Freelance2000OPCServer.42.1",
+  "opc_server_host": "192.168.111.21",
+  "opc_server_url": "opcda://192.168.111.21/Freelance2000OPCServer.42.1",
+  "http_port": 8080,
+  "tags_file": "tags.json",
+  "log_file": "logs\\opc_agent.log",
+  "log_level": "Info"
+}
 ```
 
-## 📊 API 端点
+- 服务器地址用 `opc_server_prog_id` + `opc_server_host`，或等价的 `opc_server_url`（`opcda://host/progid`）。
+- `tags_file`：标签持久化文件，默认 `tags.json`（与 config.json 同级，可单独指定路径）。
 
-### C# 代理 (端口 8080)
-- `GET /api/status` - 系统状态
-- `GET /api/data` - 当前数据（键值对）
-- `GET /api/data/list` - 当前数据（列表）
-- `GET /api/browse` - 浏览根节点
-- `GET /api/browse/node?nodeId=xxx` - 浏览指定节点
-- `POST /api/save-tags` - 保存标签配置
+### collector.ini（Go 采集器）
 
-### Go 采集器 (端口 9090)
-- `GET /api/config` - 获取配置
-- `POST /api/config` - 更新配置
-- `GET /api/config/import` - 导入配置
-- `GET /api/config/export` - 导出配置
-- `POST /api/mqtt/test` - 测试 MQTT
-- `GET /api/status` - 获取状态
-- `GET /api/data` - 获取数据
-
-## 🏗️ 架构
-
-```
-┌─────────────────┐         HTTP API          ┌──────────────────┐
-│  Linux采集程序   │ ◄─────────────────────────► │ Windows代理程序  │
-│  (Go语言)       │                            │  (C# .NET)      │
-│                 │                            │                 │
-│  ┌───────────┐  │                            │  ┌───────────┐  │
-│  │ MQTT发布  │  │                            │  │ OPC DA    │  │
-│  │ (可选)    │  │                            │  │ 客户端    │  │
-│  └───────────┘  │                            │  └───────────┘  │
-│                 │                            │                 │
-│  ┌───────────┐  │                            │  ┌───────────┐  │
-│  │ Web配置   │  │                            │  │ OPC浏览器  │  │
-│  │ 界面      │  │                            │  │ (浏览/选择)│  │
-│  └───────────┘  │                            │  └───────────┘  │
-└─────────────────┘                            └──────────────────┘
-                                                    │
-                                                    │ OPC DA协议
-                                                    ▼
-                                           ┌──────────────────┐
-                                           │  OPC DA服务器    │
-                                           │  (Windows)       │
-                                           └──────────────────┘
-```
-
-## 📝 配置示例
-
-### collector.ini (Go 采集器)
 ```ini
 [main]
+opc_host=172.16.32.98
+opc_server=Freelance2000OPCServer.42.1
 title=采集系统
 debug=False
-task_count=1
-opc_host=172.16.32.98
-opc_server=KEPware.KEPServerEx.V4
 
 [mqtt]
 enabled=True
@@ -199,43 +118,58 @@ topic=opc/data
 [task1]
 task=True
 job_interval_second=1
-tag_count=100
 tag_opc1=channel1.device1.value
 tag_dbn1=device1_value
 ```
 
-### config.json (C# 代理)
-```json
-{
-  "opc_server_url": "opcda://localhost/OPCServer.WinCC",
-  "http_port": 8080,
-  "update_interval_ms": 1000,
-  "batch_size": 500,
-  "log_file": "logs\\opc_agent.log",
-  "log_level": "Info"
-}
+- 数据源 URL 默认 `http://172.16.32.98:8080/api/stream`（SSE）。采集器检测到 URL 含 `/api/stream` 时走 SSE 长轮询 + 指数退避断线重连；否则按原 HTTP 轮询。
+
+## API 端点
+
+### C# 代理（端口 8080）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/status` | 连接状态、读计数、错误计数 |
+| GET  | `/api/data` | 当前数据快照（键值对） |
+| GET  | `/api/browse?offset=&limit=` | 浏览根节点（分页） |
+| GET  | `/api/browse/node?nodeId=&offset=&limit=` | 浏览子节点（分页，向下展开） |
+| GET  | `/api/tags` | 获取已选标签 |
+| POST | `/api/tags` | 保存 / 导入标签（写入 tags.json） |
+| GET  | `/api/stream` | SSE 实时推送 |
+
+SSE 帧格式（`text/event-stream`，15s 心跳 `: ping`）：
+
+```
+data: {"ts":"2026-...","values":[{"key":"<nodeId>","value":...,"quality":"Good","timestamp":"..."}]}
+
 ```
 
-## 🔍 故障排除
+### Go 采集器（端口 9090）
 
-### Windows 代理
-| 问题 | 解决方案 |
-|------|---------|
-| 无法连接 OPC 服务器 | 检查 OPC 服务、DCOM 权限 |
-| HTTP 服务器启动失败 | 以管理员权限运行 |
-| 点号找不到 | 使用浏览 API 查看可用标签 |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/config` | 获取配置 |
+| POST | `/api/config` | 更新配置 |
+| GET  | `/api/config/import` | 导入配置 |
+| GET  | `/api/config/export` | 导出配置 |
+| POST | `/api/mqtt/test` | 测试 MQTT 连接 |
+| GET  | `/api/status` | 运行状态 |
+| GET  | `/api/data` | 最近一次采集数据 |
 
-### Linux 采集器
-| 问题 | 解决方案 |
-|------|---------|
-| 配置加载失败 | 检查 INI/JSON 格式 |
-| MQTT 连接失败 | 检查服务器地址、端口 |
-| Web 界面无法访问 | 检查端口占用、防火墙 |
+## 编译 / CI
 
-## 📄 许可证
+- **C#**：GitHub Actions（`windows-2022`）执行 `msbuild /p:Platform=x86`；互操作程序集使用仓库内置的 `Interop.OPCAutomation.dll`（HintPath 引用），不在 CI 上重新生成，以保证 CLSID 与目标机已注册的一致。
+- **Go**：`go build`（无需 CGO）。
 
-MIT License
+## 文档索引
 
----
+- [AGENTS.md](AGENTS.md) — 开发指南
+- [docs/BROWSE_API.md](docs/BROWSE_API.md) — 浏览 API（分页 / 向下展开）
+- [docs/COLLECTOR_CONFIG.md](docs/COLLECTOR_CONFIG.md) — 采集器配置
+- [docs/GITHUB_ACTIONS.md](docs/GITHUB_ACTIONS.md) — CI 构建说明
+- [docs/OPC_DA_SETUP_GUIDE.md](docs/OPC_DA_SETUP_GUIDE.md) — OPC DA 部署与排错
 
-**项目完成**: 2026-01-18
+## 许可证
+
+MIT
