@@ -77,7 +77,7 @@ namespace OPC_DA_Agent
 
         // 标签配置
         [JsonProperty("tags_file")]
-        public string TagsFile { get; set; }
+        public string TagsFile { get; set; } = "tags.json";
 
         [JsonProperty("tags")]
         public List<TagConfig> Tags { get; set; } = new List<TagConfig>();
