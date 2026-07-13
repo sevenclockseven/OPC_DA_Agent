@@ -69,6 +69,7 @@ namespace OPC_DA_Agent
             _config = config;
             _logger = logger;
             _configPath = configPath ?? "config.json";
+            _tags = config.Tags != null ? new List<TagConfig>(config.Tags) : new List<TagConfig>();
             _startTime = DateTime.Now;
         }
 

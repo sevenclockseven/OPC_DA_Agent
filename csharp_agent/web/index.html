@@ -45,7 +45,12 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
         <input id="manualInput" placeholder="手动输入 OPC 点号 ItemID" />
         <button class="btn" id="btnManual" type="button">添加</button>
       </div>
-      <button class="btn" id="btnSave" type="button">保存并应用</button>
+      <div class="manual-row">
+        <button class="btn" id="btnExport" type="button">导出</button>
+        <button class="btn" id="btnImport" type="button">导入</button>
+        <input type="file" id="importFile" accept=".json,application/json" style="display:none" />
+      </div>
+      <button class="btn" id="btnSave" type="button" style="width:100%">保存并应用</button>
       <ul class="tag-list" id="tagList"></ul>
     </div>
 </div>
@@ -222,6 +227,52 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     inp.value = '';
   }
 
+  function loadTagsIntoUI() {
+    api('/api/tags', 'GET', null, function(r) {
+      if (r.success && r.data) {
+        selected = {};
+        (r.data || []).forEach(function(t) { selected[t.node_id] = t; });
+        renderTagList();
+      }
+    });
+  }
+
+  function exportTags() {
+    api('/api/tags', 'GET', null, function(r) {
+      if (!r.success || !r.data) { alert('导出失败: ' + (r.message || '未知错误')); return; }
+      var blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'tags.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  function importTags(file) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      var tags;
+      try { tags = JSON.parse(reader.result); }
+      catch (e) { alert('JSON 解析失败: ' + e.message); return; }
+      if (!Array.isArray(tags)) { alert('文件格式应为标签数组'); return; }
+      api('/api/tags', 'POST', { tags: tags }, function(r) {
+        if (r.success) {
+          selected = {};
+          tags.forEach(function(t) { selected[t.node_id] = t; });
+          renderTagList();
+          alert(r.message || '导入成功');
+        } else {
+          alert('导入失败: ' + r.message);
+        }
+      });
+    };
+    reader.readAsText(file);
+  }
+
   function saveTags() {
     var keys = Object.keys(selected);
     if (keys.length === 0) { alert('请先选择标签'); return; }
@@ -252,8 +303,15 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
   document.getElementById('manualInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); addManual(); }
   });
+  document.getElementById('btnExport').onclick = exportTags;
+  document.getElementById('btnImport').onclick = function() { document.getElementById('importFile').click(); };
+  document.getElementById('importFile').addEventListener('change', function(e) {
+    if (e.target.files && e.target.files[0]) importTags(e.target.files[0]);
+    e.target.value = '';
+  });
 
   loadRoot();
+  loadTagsIntoUI();
   loadStatus();
   setInterval(loadStatus, 3000);
 })();
