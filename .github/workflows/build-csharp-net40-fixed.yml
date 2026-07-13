@@ -21,18 +21,6 @@ jobs:
       with:
         msbuild-version: '16.0'
 
-    - name: Install OPC Core Components
-      run: |
-        choco install opc-components --version 106.0.201.2 -y --no-progress
-        Write-Host "Verifying OPC Automation registration..."
-        # 验证类型库是否已注册
-        try {
-          $t = [System.Type]::GetTypeFromProgID("OPCAutomation.OPCServer")
-          Write-Host "OPC Automation ProgID: " + $(if ($t) { "REGISTERED" } else { "NOT FOUND" })
-        } catch {
-          Write-Host "Verification error: $_"
-        }
-
     - name: Create working copy
       run: |
         # 创建工作目录
