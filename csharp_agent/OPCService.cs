@@ -67,10 +67,31 @@ namespace OPC_DA_Agent
             {
                 _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
 
-                Type serverType = Type.GetTypeFromProgID("OPCAutomation.OPCServer");
+                // 尝试多种 ProgID
+                string[] progIds = { "OPCAutomation.OPCServer", "OPC.Automation", "OPC.Server", "OpcDaAuto.OPCServer" };
+                Type serverType = null;
+                foreach (string pid in progIds)
+                {
+                    serverType = Type.GetTypeFromProgID(pid);
+                    if (serverType != null)
+                    {
+                        _logger.Info(string.Format("找到ProgID: {0}", pid));
+                        break;
+                    }
+                }
+
                 if (serverType == null)
                 {
-                    _logger.Error("OPCAutomation.OPCServer 未注册，请安装 OPC Core Components");
+                    // 最后的兜底方案：直接用 OPC DA 服务器的 ProgID 创建 COM 对象
+                    serverType = Type.GetTypeFromProgID(_config.OpcServerProgId);
+                    if (serverType != null)
+                    {
+                        _logger.Info(string.Format("直接用服务器ProgID连接: {0}", _config.OpcServerProgId));
+                        _opcServer = Activator.CreateInstance(serverType);
+                        _logger.Info(string.Format("已连接到OPC服务器"));
+                        return true;
+                    }
+                    _logger.Error("未找到任何OPC客户端ProgID，请安装OPC Core Components");
                     return false;
                 }
 
