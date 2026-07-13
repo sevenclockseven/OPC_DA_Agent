@@ -79,9 +79,6 @@ namespace OPC_DA_Agent
         [JsonProperty("tags_file")]
         public string TagsFile { get; set; } = "tags.json";
 
-        [JsonProperty("tags")]
-        public List<TagConfig> Tags { get; set; } = new List<TagConfig>();
-
         // 日志配置
         [JsonProperty("log_file")]
         public string LogFile { get; set; } = "logs\\opc_agent.log";
@@ -182,26 +179,7 @@ namespace OPC_DA_Agent
                 BatchSize = 500,
                 TagsFile = "tags.json",
                 LogFile = "logs\\opc_agent.log",
-                LogLevel = "Info",
-                Tags = new List<TagConfig>
-                {
-                    new TagConfig
-                    {
-                        NodeId = "Channel1.Device1.Temperature",
-                        Name = "Temperature",
-                        Description = "温度传感器",
-                        DataType = "Double",
-                        Enabled = true
-                    },
-                    new TagConfig
-                    {
-                        NodeId = "Channel1.Device1.Pressure",
-                        Name = "Pressure",
-                        Description = "压力传感器",
-                        DataType = "Double",
-                        Enabled = true
-                    }
-                }
+                LogLevel = "Info"
             };
         }
     }
