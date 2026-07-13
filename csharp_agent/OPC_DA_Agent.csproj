@@ -45,17 +45,16 @@
     <Reference Include="Newtonsoft.Json">
       <HintPath>packages\Newtonsoft.Json.13.0.3\lib\net40\Newtonsoft.Json.dll</HintPath>
     </Reference>
-    <!-- OPC Automation COM 类型库（需要先注册 OPCDAAuto.dll） -->
-    <COMReference Include="OPCAutomation">
-      <Guid>{28E68F91-8D75-11D1-8DC3-3C302A000000}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-    <!-- 兜底方案：当 COMReference 无法解析时使用 -->
+    <!--
+      关键：仅使用参考程序编译出的 Interop.OPCAutomation.dll，不再使用 COMReference。
+      COMReference 会在 CI 上按“本机类型库版本”重新生成互操作程序集，
+      导致其内嵌的 CLSID 与“能运行参考程序的 Windows 机器”注册的不一致，
+      从而在运行时报 REGDB_E_CLASSNOTREG (0x80040154)。
+      改用 HintPath 直接引用参考程序的 Interop.OPCAutomation.dll，
+      可保证 new OPCServer() 实例化的 CLSID {28E68F9A-8D75-11D1-8DC3-3C302A000000}
+      与参考程序完全一致，运行时由同一台机器已注册的 OPC 自动化 COM 服务器提供。
+      该互操作 DLL 会在编译后复制到输出目录，运行时由它提供 CLSID。
+    -->
     <Reference Include="Interop.OPCAutomation">
       <HintPath>$(ProjectDir)Interop.OPCAutomation.dll</HintPath>
       <Private>true</Private>
