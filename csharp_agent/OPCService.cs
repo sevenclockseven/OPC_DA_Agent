@@ -280,40 +280,45 @@ namespace OPC_DA_Agent
                     }
                 }
 
+                const int maxBrowseNodes = 5000;
+                bool truncated = false;
+
                 browser.ShowBranches();
                 foreach (string branch in browser)
                 {
-                    if (!string.IsNullOrEmpty(branch))
+                    if (string.IsNullOrEmpty(branch)) continue;
+                    result.Add(new OPCNode
                     {
-                        result.Add(new OPCNode
-                        {
-                            NodeId = branch,
-                            Name = branch,
-                            Description = "分支",
-                            IsFolder = true,
-                            HasChildren = true,
-                            Children = new List<OPCNode>()
-                        });
-                    }
+                        NodeId = branch,
+                        Name = branch,
+                        Description = "分支",
+                        IsFolder = true,
+                        HasChildren = true,
+                        Children = new List<OPCNode>()
+                    });
+                    if (result.Count >= maxBrowseNodes) { truncated = true; break; }
                 }
 
-                browser.ShowLeafs(true);
+                // Flat=true 会把整棵树的全部叶子摊平返回（数量可达数万），树形浏览只取当前节点的直接叶子
+                browser.ShowLeafs(false);
                 foreach (string leaf in browser)
                 {
-                    if (!string.IsNullOrEmpty(leaf))
+                    if (string.IsNullOrEmpty(leaf)) continue;
+                    if (result.Count >= maxBrowseNodes) { truncated = true; break; }
+                    string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
+                    result.Add(new OPCNode
                     {
-                        string fullId = string.IsNullOrEmpty(nodeId) || nodeId == "Root" ? leaf : nodeId + "." + leaf;
-                        result.Add(new OPCNode
-                        {
-                            NodeId = fullId,
-                            Name = leaf,
-                            Description = "标签",
-                            IsFolder = false,
-                            HasChildren = false,
-                            Children = null
-                        });
-                    }
+                        NodeId = fullId,
+                        Name = leaf,
+                        Description = "标签",
+                        IsFolder = false,
+                        HasChildren = false,
+                        Children = null
+                    });
                 }
+
+                if (truncated)
+                    _logger.Warn(string.Format("[Browse] 节点数超过 {0}，已截断（nodeId={1}）", maxBrowseNodes, nodeId ?? "(root)"));
             }
             catch (Exception ex)
             {
