@@ -68,7 +68,7 @@ namespace OPC_DA_Agent
                     _logger.Error("读取标签文件失败: " + path, ex);
                 }
             }
-            return _config.Tags != null ? new List<TagConfig>(_config.Tags) : new List<TagConfig>();
+            return new List<TagConfig>();
         }
 
         private void SaveTagsToFile()
@@ -478,7 +478,6 @@ namespace OPC_DA_Agent
                 }
             }
 
-            _config.Tags = newTags;
             SaveTagsToFile();
         }
 
