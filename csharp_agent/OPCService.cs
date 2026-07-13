@@ -9,8 +9,8 @@ namespace OPC_DA_Agent
 {
     public class OPCService : IDisposable
     {
-        private OPCServer _opcServer;
-        private OPCGroup _opcGroup;
+        private dynamic _opcServer;
+        private dynamic _opcGroup;
         private List<TagConfig> _tags = new List<TagConfig>();
         private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
@@ -67,7 +67,14 @@ namespace OPC_DA_Agent
             {
                 _logger.Info(string.Format("正在连接到OPC服务器: {0}...", _config.OpcServerProgId));
 
-                _opcServer = new OPCServer();
+                Type serverType = Type.GetTypeFromProgID("OPCAutomation.OPCServer");
+                if (serverType == null)
+                {
+                    _logger.Error("OPCAutomation.OPCServer 未注册，请安装 OPC Core Components");
+                    return false;
+                }
+
+                _opcServer = Activator.CreateInstance(serverType);
 
                 string host = _config.OpcServerHost;
                 if (!string.IsNullOrEmpty(host) && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
