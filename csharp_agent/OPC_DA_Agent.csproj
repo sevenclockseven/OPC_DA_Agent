@@ -73,7 +73,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
-    <None Include="OPC_DA_Agent.exe.manifest" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="OPCDAAuto.dll">
