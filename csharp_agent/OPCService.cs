@@ -261,14 +261,10 @@ namespace OPC_DA_Agent
             var result = new List<OPCNode>();
             try
             {
-                Type serverType = _opcServer.GetType();
-                object browser = serverType.InvokeMember("OPCBrowser",
-                    System.Reflection.BindingFlags.GetProperty | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
-                    null, _opcServer, null);
+                // OPC Automation 没有 OPCBrowser 属性；正确方式是用 CreateBrowser() 方法获取浏览器对象
+                dynamic dynBrowser = _opcServer.CreateBrowser();
+                if (dynBrowser == null) return result;
 
-                if (browser == null) return result;
-
-                dynamic dynBrowser = browser;
                 dynBrowser.MoveToRoot();
 
                 if (!string.IsNullOrEmpty(nodeId) && nodeId != "Root")
