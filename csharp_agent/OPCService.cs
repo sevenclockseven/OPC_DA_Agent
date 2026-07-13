@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
+using Newtonsoft.Json;
 using OPCAutomation;
 
 namespace OPC_DA_Agent
@@ -43,6 +45,49 @@ namespace OPC_DA_Agent
 
         public string ConfigPath { get { return _configPath; } }
 
+        private string ResolveTagsFilePath()
+        {
+            var name = string.IsNullOrEmpty(_config.TagsFile) ? "tags.json" : _config.TagsFile;
+            if (Path.IsPathRooted(name)) return name;
+            var dir = Path.GetDirectoryName(_configPath);
+            return Path.Combine(string.IsNullOrEmpty(dir) ? "." : dir, name);
+        }
+
+        private List<TagConfig> LoadTagsFromFile()
+        {
+            var path = ResolveTagsFilePath();
+            if (File.Exists(path))
+            {
+                try
+                {
+                    var tags = JsonConvert.DeserializeObject<List<TagConfig>>(File.ReadAllText(path));
+                    if (tags != null) return tags;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error("读取标签文件失败: " + path, ex);
+                }
+            }
+            return _config.Tags != null ? new List<TagConfig>(_config.Tags) : new List<TagConfig>();
+        }
+
+        private void SaveTagsToFile()
+        {
+            try
+            {
+                var path = ResolveTagsFilePath();
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                File.WriteAllText(path, JsonConvert.SerializeObject(_tags, Formatting.Indented));
+                _logger.Info(string.Format("标签已保存到 {0}（{1}个）", path, _tags.Count));
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("保存标签文件失败", ex);
+            }
+        }
+
         public bool IsConnected
         {
             get
@@ -69,7 +114,7 @@ namespace OPC_DA_Agent
             _config = config;
             _logger = logger;
             _configPath = configPath ?? "config.json";
-            _tags = config.Tags != null ? new List<TagConfig>(config.Tags) : new List<TagConfig>();
+            _tags = LoadTagsFromFile();
             _startTime = DateTime.Now;
         }
 
@@ -434,15 +479,7 @@ namespace OPC_DA_Agent
             }
 
             _config.Tags = newTags;
-            try
-            {
-                _config.SaveToFile(_configPath);
-                _logger.Info(string.Format("标签配置已保存到 {0}（{1}个标签）", _configPath, newTags.Count));
-            }
-            catch (Exception ex)
-            {
-                _logger.Error("保存标签配置失败", ex);
-            }
+            SaveTagsToFile();
         }
 
         public List<TagConfig> GetTags()
