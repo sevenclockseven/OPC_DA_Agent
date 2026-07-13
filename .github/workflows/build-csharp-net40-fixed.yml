@@ -52,7 +52,7 @@ jobs:
         if (!(Test-Path $refDir)) {
           $refDir = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Reference Assemblies\Microsoft\Framework\.NETFramework\v4.0"
         }
-        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Debug /p:Platform=AnyCPU /p:FrameworkPathOverride="$refDir" /v:minimal
+        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Debug /p:Platform=x86 /p:FrameworkPathOverride="$refDir" /v:minimal
 
     - name: Build Release (.NET 4.0 / XP)
       run: |
@@ -60,7 +60,7 @@ jobs:
         if (!(Test-Path $refDir)) {
           $refDir = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Reference Assemblies\Microsoft\Framework\.NETFramework\v4.0"
         }
-        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Release /p:Platform=AnyCPU /p:FrameworkPathOverride="$refDir" /v:minimal
+        msbuild 'work\csharp_agent\OPC_DA_Agent.csproj' /p:Configuration=Release /p:Platform=x86 /p:FrameworkPathOverride="$refDir" /v:minimal
 
     - name: Verify builds
       run: |
