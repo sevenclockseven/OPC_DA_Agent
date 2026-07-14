@@ -101,6 +101,21 @@ namespace OPC_DA_Agent
         {
             if (!_isRunning) return;
 
+            // 必须先重新挂起下一个 Accept，再处理当前请求。
+            // 原实现在 ProcessRequest 返回后才挂起；而 /api/stream(SSE) 等长连接会长期占用
+            // 唯一的回调线程，导致 BeginGetContext 无法及时重新挂起，浏览器页面与轮询请求被积压，
+            // 最终 ERR_CONNECTION_RESET / 超时，必须重启代理才能恢复。
+            try
+            {
+                if (_isRunning && _listener != null && _listener.IsListening)
+                    _listener.BeginGetContext(OnGetContext, null);
+            }
+            catch (ObjectDisposedException) { }
+            catch (Exception ex)
+            {
+                _logger.Error("重新挂起 HTTP 监听失败", ex);
+            }
+
             HttpListenerContext context = null;
             try
             {
@@ -108,18 +123,10 @@ namespace OPC_DA_Agent
                 _requestCount++;
                 ProcessRequest(context);
             }
-            catch (ObjectDisposedException) { return; }
+            catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
                 _logger.Error("处理HTTP请求时发生错误", ex);
-            }
-            finally
-            {
-                if (_isRunning && _listener != null && _listener.IsListening)
-                {
-                    try { _listener.BeginGetContext(OnGetContext, null); }
-                    catch (ObjectDisposedException) { }
-                }
             }
         }
 
