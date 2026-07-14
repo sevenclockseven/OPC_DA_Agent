@@ -9,10 +9,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/robertkrimen/otto"
 	"log"
 	"os"
 	"os/signal"
@@ -438,13 +440,13 @@ func (tr *TaskRunner) processAndPublish(collector *Collector, rawData []map[stri
 	}
 
 	if collector.mqttClient != nil && collector.mqttClient.IsConnected() {
-		if err := collector.mqttClient.Publish(msg); err != nil {
+		if err := collector.mqttClient.Publish(msg, tr.task.HttpSource); err != nil {
 			log.Printf("MQTT发送失败: %v", err)
 		}
 	}
 
 	if collector.rtdbClient != nil && collector.rtdbClient.IsConnected() {
-		if err := collector.rtdbClient.Send(msg); err != nil {
+		if err := collector.rtdbClient.Send(msg, tr.task.HttpSource); err != nil {
 			log.Printf("RTDB发送失败: %v", err)
 		}
 	}
@@ -491,7 +493,7 @@ func (c *RtdbClient) IsConnected() bool {
 	return c.connected
 }
 
-func (c *RtdbClient) Send(message map[string]interface{}) error {
+func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("RTDB未连接")
 	}
@@ -509,9 +511,10 @@ func (c *RtdbClient) Send(message map[string]interface{}) error {
 		if err != nil {
 			return fmt.Errorf("发送数据失败: %v", err)
 		}
-		log.Printf("RTDB发送: %s", line)
+		log.Printf("RTDB发送 [数据源:%s]: %s", source, line)
 	}
 
+	log.Printf("📤 RTDB发送成功 [数据源:%s] %d 条", source, len(values))
 	return nil
 }
 
@@ -542,15 +545,21 @@ func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]i
 }
 
 type MqttClient struct {
-	config *MqttConfig
-	client mqtt.Client
+	config    *MqttConfig
+	client    mqtt.Client
+	vm        *otto.Otto
 	connected bool
 }
 
 func NewMqttClient(config *MqttConfig) *MqttClient {
-	return &MqttClient{
+	c := &MqttClient{
 		config: config,
 	}
+	// 预创建 JS 引擎（仅在配置了 js_transform 时），避免每条消息重复创建
+	if config != nil && config.JsTransform != "" {
+		c.vm = otto.New()
+	}
+	return c
 }
 
 func (c *MqttClient) Connect() error {
@@ -591,44 +600,145 @@ func (c *MqttClient) IsConnected() bool {
 	return c.client.IsConnected()
 }
 
-func (c *MqttClient) Publish(message map[string]interface{}) error {
+// renderPayloads 依据 format / js_transform / split 配置，把一批数据渲染成若干条待发布报文。
+func (c *MqttClient) renderPayloads(message map[string]interface{}) ([]string, error) {
+	format := c.config.Format
+
+	// full（或空）：整包 JSON，保持原有行为不变
+	if format == "" || format == "full" {
+		b, err := json.Marshal(message)
+		if err != nil {
+			return nil, fmt.Errorf("JSON序列化失败: %v", err)
+		}
+		return []string{string(b)}, nil
+	}
+
+	// flat：仅 values 映射
+	if format == "flat" {
+		if values, ok := message["values"].(map[string]interface{}); ok {
+			b, err := json.Marshal(values)
+			if err != nil {
+				return nil, fmt.Errorf("JSON序列化失败: %v", err)
+			}
+			return []string{string(b)}, nil
+		}
+		b, err := json.Marshal(message)
+		if err != nil {
+			return nil, fmt.Errorf("JSON序列化失败: %v", err)
+		}
+		return []string{string(b)}, nil
+	}
+
+	// 自定义模板 / js_transform：逐点渲染
+	values, _ := message["values"].(map[string]interface{})
+	metadata, _ := message["metadata"].(map[string]interface{})
+
+	// 按 key 排序，保证输出顺序确定
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	payloads := make([]string, 0, len(keys))
+	for _, key := range keys {
+		quality := 192
+		timestamp := time.Now().UnixMilli()
+		if meta, ok := metadata[key].(map[string]interface{}); ok {
+			if q, ok := meta["quality"].(int); ok {
+				quality = q
+			}
+			if t, ok := meta["timestamp"].(int64); ok {
+				timestamp = t
+			}
+		}
+
+		var s string
+		var err error
+		if c.config.JsTransform != "" {
+			s, err = c.applyJsTransform(key, values[key], quality, timestamp)
+		} else {
+			s = renderTemplate(format, key, values[key], quality, timestamp)
+		}
+		if err != nil {
+			return nil, err
+		}
+		payloads = append(payloads, s)
+	}
+
+	// 扇出：split=true 时每点一条报文；否则合并为一包（默认）
+	if c.config.Split {
+		return payloads, nil
+	}
+	return []string{strings.Join(payloads, "\n")}, nil
+}
+
+// renderTemplate 按占位符替换渲染单行（与 RTDB 的 formatLine 保持同一套占位符）
+func renderTemplate(format, key string, value interface{}, quality int, timestamp int64) string {
+	result := format
+	result = strings.ReplaceAll(result, "{key}", key)
+	result = strings.ReplaceAll(result, "{value}", fmt.Sprintf("%v", value))
+	result = strings.ReplaceAll(result, "{quality}", fmt.Sprintf("%d", quality))
+	result = strings.ReplaceAll(result, "{timestamp}", fmt.Sprintf("%d", timestamp))
+	return result
+}
+
+// applyJsTransform 用 otto 执行用户脚本，变量 point={key,value,quality,timestamp}；
+// 返回字符串直接作为电文，或对象经 JSON 序列化。
+func (c *MqttClient) applyJsTransform(key string, value interface{}, quality int, timestamp int64) (string, error) {
+	if c.vm == nil {
+		return "", fmt.Errorf("js_transform 需要引入 github.com/robertkrimen/otto 依赖（当前构建未包含）")
+	}
+	input := map[string]interface{}{
+		"key":       key,
+		"value":     value,
+		"quality":   quality,
+		"timestamp": timestamp,
+	}
+	if err := c.vm.Set("point", input); err != nil {
+		return "", fmt.Errorf("JS变量注入失败: %v", err)
+	}
+	v, err := c.vm.Run(c.config.JsTransform)
+	if err != nil {
+		return "", fmt.Errorf("JS执行失败: %v", err)
+	}
+	exported, err := v.Export()
+	if err != nil {
+		return "", fmt.Errorf("JS结果导出失败: %v", err)
+	}
+	switch out := exported.(type) {
+	case string:
+		return out, nil
+	default:
+		b, err := json.Marshal(out)
+		if err != nil {
+			return "", fmt.Errorf("JS结果序列化失败: %v", err)
+		}
+		return string(b), nil
+	}
+}
+
+func (c *MqttClient) Publish(message map[string]interface{}, source string) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("MQTT未连接")
 	}
 
-	var publishData []byte
-	var err error
-
-	if c.config.Format != "" && c.config.Format != "full" {
-		publishData, err = c.formatMessage(message, c.config.Format)
-	} else {
-		publishData, err = json.Marshal(message)
-	}
-
+	payloads, err := c.renderPayloads(message)
 	if err != nil {
-		return fmt.Errorf("JSON序列化失败: %v", err)
+		return err
 	}
 
 	qos := byte(c.config.Qos)
-	token := c.client.Publish(c.config.Topic, qos, c.config.Retain, string(publishData))
-	if token.Wait() && token.Error() != nil {
-		log.Printf("MQTT发布失败: %v", token.Error())
-		return token.Error()
-	}
-
-	log.Printf("MQTT发布成功: %s", c.config.Topic)
-	return nil
-}
-
-func (c *MqttClient) formatMessage(message map[string]interface{}, format string) ([]byte, error) {
-	if format == "flat" {
-		if values, ok := message["values"].(map[string]interface{}); ok {
-			return json.Marshal(values)
+	for _, payload := range payloads {
+		token := c.client.Publish(c.config.Topic, qos, c.config.Retain, payload)
+		if token.Wait() && token.Error() != nil {
+			log.Printf("MQTT发布失败 [数据源:%s]: %v", source, token.Error())
+			return token.Error()
 		}
-		return json.Marshal(message)
 	}
 
-	return json.Marshal(message)
+	log.Printf("📤 MQTT发布成功 [数据源:%s] topic=%s 条数=%d", source, c.config.Topic, len(payloads))
+	return nil
 }
 
 func (c *MqttClient) Disconnect() {

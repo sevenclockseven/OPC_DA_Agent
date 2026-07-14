@@ -28,8 +28,9 @@ type MqttConfig struct {
 	ClientId   string `json:"client_id" ini:"client_id"`
 	Qos        int    `json:"qos" ini:"qos"`
 	Retain     bool   `json:"retain" ini:"retain"`
-	Format     string `json:"format" ini:"format"`
-	JsTransform string `json:"js_transform" ini:"js_transform"`
+	Format      string `json:"format" ini:"format"`
+	JsTransform  string `json:"js_transform" ini:"js_transform"`
+	Split       bool   `json:"split" ini:"split"`
 }
 
 type RtdbConfig struct {
