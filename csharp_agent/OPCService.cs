@@ -222,53 +222,53 @@ namespace OPC_DA_Agent
                     }
                 }
 
+                // AddItems 是 COM 调用，必须在锁外执行：该调用被封送到 OPC 的宿主 STA 线程，
+                // 若持 _lock 期间发起，会与同样需要 _lock 的 OnDataChange（也在该 STA 线程）形成死锁。
+                Array serverHandles = null;
                 if (opcItemIDs.Count > 1)
                 {
                     Array itemsArray = opcItemIDs.ToArray();
                     Array handlesArray = clientHandles.ToArray();
-                    Array serverHandles, errors;
-
+                    Array errors;
                     _opcItems.AddItems(opcItemIDs.Count - 1, ref itemsArray, ref handlesArray,
                         out serverHandles, out errors, null, null);
                     _serverHandles = serverHandles;
-
-                    _clientHandleNodes = nodeByHandle;
-
                     _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签", opcItemIDs.Count - 1, _tags.Count));
+                }
 
-                    lock (_lock)
+                // 首读（COM，锁外）：先收集到局部字典，避免与 OnDataChange 并发写 _lastValues
+                var initialValues = new Dictionary<string, object>();
+                try
+                {
+                    int count = _opcItems.Count;
+                    for (int i = 1; i <= count; i++)
                     {
-                        foreach (var tag in _tags)
+                        try
                         {
-                            if (tag.Enabled || tag.Active)
-                            {
-                                _lastValues[tag.NodeId] = null;
-                            }
+                            OPCItem item = _opcItems.Item(i);
+                            object v, q, t;
+                            item.Read(2, out v, out q, out t);
+                            if (i - 1 < nodeByHandle.Count && !string.IsNullOrEmpty(nodeByHandle[i]))
+                                initialValues[nodeByHandle[i]] = v;
                         }
+                        catch { }
                     }
+                    _logger.Info("OPC 标签初始值读取完成");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn("OPC 标签初始值读取失败（将由订阅推送补齐）: " + ex.Message);
+                }
 
-                    // 首读一次填充当前值，避免订阅首包到达前 /api/data 为空
-                    try
-                    {
-                        int count = _opcItems.Count;
-                        for (int i = 1; i <= count; i++)
-                        {
-                            try
-                            {
-                                OPCItem item = _opcItems.Item(i);
-                                object v, q, t;
-                                item.Read(2, out v, out q, out t);
-                                if (i - 1 < _clientHandleNodes.Count && !string.IsNullOrEmpty(_clientHandleNodes[i]))
-                                    _lastValues[_clientHandleNodes[i]] = v;
-                            }
-                            catch { }
-                        }
-                        _logger.Info("OPC 标签初始值读取完成");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warn("OPC 标签初始值读取失败（将由订阅推送补齐）: " + ex.Message);
-                    }
+                // 仅数据结构更新加锁：清空重建 _lastValues 并切换 _clientHandleNodes
+                lock (_lock)
+                {
+                    _clientHandleNodes = nodeByHandle;
+                    _lastValues.Clear();
+                    foreach (var kvp in initialValues) _lastValues[kvp.Key] = kvp.Value;
+                    foreach (var tag in _tags)
+                        if ((tag.Enabled || tag.Active) && !_lastValues.ContainsKey(tag.NodeId))
+                            _lastValues[tag.NodeId] = null;
                 }
             }
             catch (Exception ex)
@@ -624,33 +624,43 @@ namespace OPC_DA_Agent
         {
             var ts = DateTime.Now;
             _logger.Info(string.Format("[Tags] 开始保存 {0} 个标签", newTags != null ? newTags.Count : 0));
-            lock (_lock)
+
+            // RemoveItems 是 COM 调用，必须在锁外：同样不能持 _lock 发起封送到 STA 的调用，
+            // 否则会与需 _lock 的 OnDataChange（同处 STA 线程）死锁。
+            if (_opcItems != null)
             {
-                if (_opcItems != null)
+                try
                 {
-                    try
+                    int count = _opcItems.Count;
+                    if (count > 0)
                     {
-                        int count = _opcItems.Count;
-                        if (count > 0)
+                        Array handles = new object[count + 1];
+                        for (int i = 1; i <= count; i++)
                         {
-                            Array handles = new object[count + 1];
-                            for (int i = 1; i <= count; i++)
-                            {
-                                handles.SetValue(i, i);
-                            }
-                            Array errors;
-                            _opcItems.Remove(count, ref handles, out errors);
+                            handles.SetValue(i, i);
                         }
+                        Array errors;
+                        _opcItems.Remove(count, ref handles, out errors);
                     }
-                    catch { }
                 }
+                catch { }
+            }
 
-                _tags = newTags;
-                _lastValues.Clear();
+            // 引用替换（读侧 GetTags 直接返回，无需锁）
+            _tags = newTags;
 
-                if (_opcItems != null && _tags.Count > 0)
+            // ApplyTags 内的 AddItems / item.Read 均为 COM 调用，已在锁外执行；
+            // 其对 _lastValues / _clientHandleNodes 的更新在 ApplyTags 内部加锁完成
+            if (_opcItems != null && _tags.Count > 0)
+            {
+                ApplyTags();
+            }
+            else
+            {
+                lock (_lock)
                 {
-                    ApplyTags();
+                    _lastValues.Clear();
+                    _clientHandleNodes = new List<string>();
                 }
             }
 
