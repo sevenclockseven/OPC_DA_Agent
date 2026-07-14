@@ -69,6 +69,11 @@ namespace OPC_DA_Agent
         [JsonProperty("batch_size")]
         public int BatchSize { get; set; } = 500;
 
+        // SSE 秒级快照推送间隔（毫秒）：>0 时，代理按固定节拍把当前最新值全量推一次 SSE，
+        // 保证采集器在值不变时也持续收到秒级数据；=0 则退回纯变化驱动（仅 OnDataChange 时推送）
+        [JsonProperty("sse_snapshot_interval_ms")]
+        public int SseSnapshotIntervalMs { get; set; } = 1000;
+
         [JsonProperty("enable_compression")]
         public bool EnableCompression { get; set; } = true;
 
