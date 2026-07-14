@@ -340,10 +340,10 @@ namespace OPC_DA_Agent
                 if (changed.Count > 0)
                 {
                     System.Threading.Interlocked.Increment(ref _totalReads);
-                    // 仅入队：序列化与网络写入交给 SsePublishLoop，避免占用 COM STA 线程饿死浏览等调用
-                    bool hasClients;
-                    lock (_sseLock) hasClients = _sseClients.Count > 0;
-                    if (hasClients) _sseQueue.Add(changed);
+                    // 仅入队：序列化与网络写入交给 SsePublishLoop，避免占用 COM STA 线程饿死浏览等调用。
+                    // 注意：这里绝不碰 _sseLock —— 若 BroadcastSse 因某客户端写阻塞而持锁，
+                    // 在 STA 线程上取 _sseLock 会反被憋死，进而卡住所有被封送到该 STA 的 COM 调用（浏览/选点）。
+                    _sseQueue.Add(changed);
                 }
             }
             catch (Exception ex)
@@ -538,6 +538,8 @@ namespace OPC_DA_Agent
         {
             string key = nodeId ?? "Root";
             List<OPCNode> all;
+            var browseStart = DateTime.Now;
+            _logger.Info(string.Format("[Browse] 开始 nodeId={0} (线程={1})", key, System.Threading.Thread.CurrentThread.ManagedThreadId));
 
             // 快速路径：先在不加锁的情况下查缓存
             lock (_lock)
@@ -559,10 +561,16 @@ namespace OPC_DA_Agent
                 // OPC COM 枚举（CreateBrowser/ShowBranches/ShowLeafs）可能很慢甚至挂起，
                 // 故放进独立任务并限时，且用 SemaphoreSlim 串行化，避免多个浏览把线程池耗尽；
                 // 同时把 COM 工作移出 _lock，避免阻塞 OnDataChange / GetData / SSE 推送。
+                bool acquired = false;
                 try
                 {
-                    _browseSemaphore.Wait(7000);
-                    try
+                    acquired = _browseSemaphore.Wait(7000);
+                    if (!acquired)
+                    {
+                        _logger.Warn(string.Format("[Browse] 获取浏览信号量超时 (nodeId={0})，返回空结果", key));
+                        all = new List<OPCNode>();
+                    }
+                    else
                     {
                         var task = Task.Factory.StartNew(() => BrowsePath(nodeId));
                         if (!task.Wait(7000))
@@ -574,10 +582,9 @@ namespace OPC_DA_Agent
                         {
                             all = task.Result;
                         }
-                    }
-                    finally
-                    {
-                        _browseSemaphore.Release();
+                        _logger.Info(string.Format("[Browse] 枚举完成 nodeId={0} 节点数={1} 耗时={2}ms",
+                            key, all != null ? all.Count : 0,
+                            (DateTime.Now - browseStart).TotalMilliseconds));
                     }
                 }
                 catch (Exception ex)
@@ -585,11 +592,19 @@ namespace OPC_DA_Agent
                     _logger.Warn(string.Format("[Browse] 分页枚举失败 (nodeId={0}): {1}", key, ex.Message));
                     all = new List<OPCNode>();
                 }
+                finally
+                {
+                    if (acquired) _browseSemaphore.Release();
+                }
 
                 lock (_lock)
                 {
                     _browseCache[key] = new BrowseCacheEntry { Nodes = all, Time = DateTime.Now };
                 }
+            }
+            else
+            {
+                _logger.Info(string.Format("[Browse] 命中缓存 nodeId={0} 节点数={1}", key, all.Count));
             }
 
             if (limit <= 0) limit = 50;
@@ -607,6 +622,8 @@ namespace OPC_DA_Agent
 
         public void UpdateTags(List<TagConfig> newTags)
         {
+            var ts = DateTime.Now;
+            _logger.Info(string.Format("[Tags] 开始保存 {0} 个标签", newTags != null ? newTags.Count : 0));
             lock (_lock)
             {
                 if (_opcItems != null)
@@ -638,6 +655,7 @@ namespace OPC_DA_Agent
             }
 
             SaveTagsToFile();
+            _logger.Info(string.Format("[Tags] 保存完成 耗时={0}ms", (DateTime.Now - ts).TotalMilliseconds));
         }
 
         public List<TagConfig> GetTags()
