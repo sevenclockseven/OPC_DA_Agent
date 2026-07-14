@@ -35,6 +35,7 @@ namespace OPC_DA_Agent
         private readonly BlockingCollection<List<TagValue>> _sseQueue = new BlockingCollection<List<TagValue>>();
         private volatile bool _sseRunning = false;
         private Thread _ssePublisher;
+        private System.Threading.Timer _snapshotTimer;
 
         private long _totalReads = 0;
         private long _totalErrors = 0;
@@ -188,6 +189,15 @@ namespace OPC_DA_Agent
                 _ssePublisher = new Thread(SsePublishLoop) { IsBackground = true, Name = "SsePublisher" };
                 _ssePublisher.Start();
 
+                // 确定性秒级采样时钟：按固定节拍把当前最新值全量推一次 SSE，保证值不变时也持续采集。
+                // 用缓存的 _lastValues 直接做快照，不发起任何 COM 调用，避免占用/阻塞 OPC 的 STA 线程。
+                if (_config.SseSnapshotIntervalMs > 0)
+                {
+                    _snapshotTimer = new System.Threading.Timer(SnapshotTick, null,
+                        _config.SseSnapshotIntervalMs, _config.SseSnapshotIntervalMs);
+                    _logger.Info(string.Format("已启动 SSE 秒级快照推送，间隔={0}ms", _config.SseSnapshotIntervalMs));
+                }
+
                 _logger.Info("OPC数据采集已启动");
                 return true;
             }
@@ -280,6 +290,11 @@ namespace OPC_DA_Agent
         public void Stop()
         {
             _sseRunning = false;
+            if (_snapshotTimer != null)
+            {
+                try { _snapshotTimer.Dispose(); } catch { }
+                _snapshotTimer = null;
+            }
             if (_opcGroup != null)
             {
                 try { _opcGroup.DataChange -= OnDataChange; } catch { }
@@ -407,6 +422,43 @@ namespace OPC_DA_Agent
             {
                 try { BroadcastSse(remaining); } catch { }
             }
+        }
+
+        // 秒级快照：把当前缓存的最新值拷成快照推一次 SSE。定时器线程（线程池 MTA）执行，
+        // 仅短暂加锁拷贝字典、检查客户端数，不碰任何 COM，故不会与 STA 线程上的 OnDataChange 形成死锁。
+        private void SnapshotTick(object state)
+        {
+            if (!_sseRunning) return;
+
+            List<TagValue> snapshot;
+            lock (_lock)
+            {
+                snapshot = new List<TagValue>(_lastValues.Count);
+                foreach (var kvp in _lastValues)
+                {
+                    object val = kvp.Value;
+                    snapshot.Add(new TagValue
+                    {
+                        Key = kvp.Key,
+                        Value = val,
+                        Quality = val == null ? "Bad" : "Good",
+                        Timestamp = DateTime.Now,
+                        Status = val == null ? "Bad" : "Good",
+                        DataType = val == null ? null : val.GetType().Name,
+                        NodeId = kvp.Key,
+                        Name = kvp.Key
+                    });
+                }
+            }
+            if (snapshot.Count == 0) return;
+
+            // 无 SSE 客户端时不浪费工作
+            lock (_sseLock)
+            {
+                if (_sseClients.Count == 0) return;
+            }
+
+            _sseQueue.Add(snapshot);
         }
 
         public StatusInfo GetStatus()
