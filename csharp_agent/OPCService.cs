@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using OPCAutomation;
 
@@ -19,6 +21,7 @@ namespace OPC_DA_Agent
         private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
         private object _lock = new object();
+        private readonly SemaphoreSlim _browseSemaphore = new SemaphoreSlim(1, 1);
 
         private Array _serverHandles;
 
@@ -26,6 +29,12 @@ namespace OPC_DA_Agent
         private readonly List<StreamWriter> _sseClients = new List<StreamWriter>();
         private readonly object _sseLock = new object();
         private List<string> _clientHandleNodes = new List<string>();
+
+        // SSE 发布：OnDataChange（运行在 OPC 的 COM STA 线程）只把变化入队后立即返回，
+        // 由独立发布线程序列化并推流，避免 JSON 序列化 + 网络写入占用 STA 线程、饿死其它 COM 调用（如浏览）
+        private readonly BlockingCollection<List<TagValue>> _sseQueue = new BlockingCollection<List<TagValue>>();
+        private volatile bool _sseRunning = false;
+        private Thread _ssePublisher;
 
         private long _totalReads = 0;
         private long _totalErrors = 0;
@@ -175,6 +184,10 @@ namespace OPC_DA_Agent
 
                 _opcGroup.DataChange += OnDataChange;
 
+                _sseRunning = true;
+                _ssePublisher = new Thread(SsePublishLoop) { IsBackground = true, Name = "SsePublisher" };
+                _ssePublisher.Start();
+
                 _logger.Info("OPC数据采集已启动");
                 return true;
             }
@@ -266,6 +279,7 @@ namespace OPC_DA_Agent
 
         public void Stop()
         {
+            _sseRunning = false;
             if (_opcGroup != null)
             {
                 try { _opcGroup.DataChange -= OnDataChange; } catch { }
@@ -326,7 +340,10 @@ namespace OPC_DA_Agent
                 if (changed.Count > 0)
                 {
                     System.Threading.Interlocked.Increment(ref _totalReads);
-                    BroadcastSse(changed);
+                    // 仅入队：序列化与网络写入交给 SsePublishLoop，避免占用 COM STA 线程饿死浏览等调用
+                    bool hasClients;
+                    lock (_sseLock) hasClients = _sseClients.Count > 0;
+                    if (hasClients) _sseQueue.Add(changed);
                 }
             }
             catch (Exception ex)
@@ -370,6 +387,25 @@ namespace OPC_DA_Agent
                 {
                     foreach (var d in dead) _sseClients.Remove(d);
                 }
+            }
+        }
+
+        // 独立发布线程：从队列取批次并推送给所有 SSE 客户端，与 OnDataChange(COM STA 线程) 解耦
+        private void SsePublishLoop()
+        {
+            while (_sseRunning)
+            {
+                List<TagValue> batch;
+                if (_sseQueue.TryTake(out batch, 200))
+                {
+                    try { BroadcastSse(batch); }
+                    catch (Exception ex) { _logger.Error("SSE 发布失败", ex); }
+                }
+            }
+            List<TagValue> remaining;
+            while (_sseQueue.TryTake(out remaining))
+            {
+                try { BroadcastSse(remaining); } catch { }
             }
         }
 
@@ -502,24 +538,56 @@ namespace OPC_DA_Agent
         {
             string key = nodeId ?? "Root";
             List<OPCNode> all;
+
+            // 快速路径：先在不加锁的情况下查缓存
             lock (_lock)
             {
-                if (_browseCache.TryGetValue(key, out var entry) &&
+                BrowseCacheEntry entry;
+                if (_browseCache.TryGetValue(key, out entry) &&
                     (DateTime.Now - entry.Time).TotalSeconds < 30)
                 {
                     all = entry.Nodes;
                 }
                 else
                 {
+                    all = null;
+                }
+            }
+
+            if (all == null)
+            {
+                // OPC COM 枚举（CreateBrowser/ShowBranches/ShowLeafs）可能很慢甚至挂起，
+                // 故放进独立任务并限时，且用 SemaphoreSlim 串行化，避免多个浏览把线程池耗尽；
+                // 同时把 COM 工作移出 _lock，避免阻塞 OnDataChange / GetData / SSE 推送。
+                try
+                {
+                    _browseSemaphore.Wait(7000);
                     try
                     {
-                        all = BrowsePath(nodeId);
+                        var task = Task.Factory.StartNew(() => BrowsePath(nodeId));
+                        if (!task.Wait(7000))
+                        {
+                            _logger.Warn(string.Format("[Browse] 枚举超时 (nodeId={0})，返回空结果", key));
+                            all = new List<OPCNode>();
+                        }
+                        else
+                        {
+                            all = task.Result;
+                        }
                     }
-                    catch (Exception ex)
+                    finally
                     {
-                        _logger.Warn(string.Format("[Browse] 分页枚举失败 (nodeId={0}): {1}", key, ex.Message));
-                        all = new List<OPCNode>();
+                        _browseSemaphore.Release();
                     }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(string.Format("[Browse] 分页枚举失败 (nodeId={0}): {1}", key, ex.Message));
+                    all = new List<OPCNode>();
+                }
+
+                lock (_lock)
+                {
                     _browseCache[key] = new BrowseCacheEntry { Nodes = all, Time = DateTime.Now };
                 }
             }
