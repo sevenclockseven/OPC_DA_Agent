@@ -86,6 +86,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.MqttConfig.Retain, _ = section.Key("retain").Bool()
 		config.MqttConfig.Format = section.Key("format").String()
 		config.MqttConfig.JsTransform = section.Key("js_transform").String()
+		config.MqttConfig.Split, _ = section.Key("split").Bool()
 	}
 
 	if section := cfg.Section("rtdb"); section != nil {
@@ -199,6 +200,7 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		section.NewKey("retain", fmt.Sprintf("%v", config.MqttConfig.Retain))
 		section.NewKey("format", config.MqttConfig.Format)
 		section.NewKey("js_transform", config.MqttConfig.JsTransform)
+		section.NewKey("split", fmt.Sprintf("%v", config.MqttConfig.Split))
 	}
 
 	for i, httpConfig := range config.HttpConfigs {

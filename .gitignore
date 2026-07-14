@@ -15,6 +15,7 @@ bin/Release/
 *.test
 *.out
 go.work
+go_collector/collector
 
 # C#
 .vs/

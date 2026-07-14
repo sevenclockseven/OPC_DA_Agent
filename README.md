@@ -114,6 +114,9 @@ enabled=True
 broker=172.16.32.98
 port=1883
 topic=opc/data
+format=full
+split=false
+js_transform=
 
 [task1]
 task=True
@@ -121,6 +124,15 @@ job_interval_second=1
 tag_opc1=channel1.device1.value
 tag_dbn1=device1_value
 ```
+
+MQTT 输出格式（`[mqtt]` 段）：
+
+- `format`：发布报文格式。
+  - `full`（默认）：整包 JSON `{"timestamp":...,"values":{...},"metadata":{...}}`，与旧版一致。
+  - `flat`：仅 `values` 映射的 JSON。
+  - **自定义模板**：含占位符 `{key}` `{value}` `{quality}` `{timestamp}` 的字符串，按每个数据点渲染一行（如 `format = {key},{value},{quality},{timestamp}`）。占位符含义与 RTDB 的 `format` 完全一致。
+- `split`：扇出方式。`false`（默认）= 所有点渲染后用换行拼成一个报文发出；`true` = 每个点单独发一条报文（适合时序库/流处理逐点摄入）。
+- `js_transform`（可选）：返回电文的 JS 表达式，可用变量 `point = {key,value,quality,timestamp}`；返回字符串直接作为电文，返回对象则经 JSON 序列化。适用于需要嵌套/条件结构的后端（依赖 `github.com/robertkrimen/otto`，已纳入 go.mod）。
 
 - 数据源 URL 默认 `http://172.16.32.98:8080/api/stream`（SSE）。采集器检测到 URL 含 `/api/stream` 时走 SSE 长轮询 + 指数退避断线重连；否则按原 HTTP 轮询。
 

@@ -587,10 +587,26 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
             </div>
             <div class="form-group">
                 <label>输出格式</label>
-                <select id="format" name="format">
-                    <option value="full">完整格式</option>
-                    <option value="flat">扁平格式</option>
+                <select id="format" name="format" onchange="onMqttFormatChange()">
+                    <option value="full">完整格式(full)</option>
+                    <option value="flat">扁平格式(flat)</option>
+                    <option value="custom">自定义模板</option>
                 </select>
+            </div>
+            <div class="form-group" id="mqttCustomFormatGroup" style="display:none;">
+                <label>自定义格式模板</label>
+                <textarea id="mqtt_custom_format" name="mqtt_custom_format" rows="3" placeholder="例如: {key},{value},{quality},{timestamp}"></textarea>
+            </div>
+            <div class="form-group">
+                <label>逐点拆分(split)</label>
+                <select id="split" name="split">
+                    <option value="false">否 - 一批拼一行</option>
+                    <option value="true">是 - 每点一条报文</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>JS转换(js_transform, 可选)</label>
+                <textarea id="js_transform" name="js_transform" rows="3" placeholder="返回电文的JS表达式, 变量 point={key,value,quality,timestamp}"></textarea>
             </div>
 
             <button type="button" onclick="saveMqtt()">💾 保存配置</button>
@@ -601,6 +617,11 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <script>
+        function onMqttFormatChange() {
+            const fmt = document.getElementById('format').value;
+            document.getElementById('mqttCustomFormatGroup').style.display = (fmt === 'custom') ? 'block' : 'none';
+        }
+
         async function loadMqtt() {
             const response = await fetch('/api/config');
             const data = await response.json();
@@ -613,11 +634,25 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('client_id').value = mqtt.client_id || '';
                 document.getElementById('qos').value = mqtt.qos?.toString() || '1';
                 document.getElementById('retain').value = mqtt.retain?.toString() || 'false';
-                document.getElementById('format').value = mqtt.format || 'full';
+                const format = mqtt.format || 'full';
+                if (format === 'full' || format === 'flat') {
+                    document.getElementById('format').value = format;
+                    document.getElementById('mqttCustomFormatGroup').style.display = 'none';
+                } else {
+                    document.getElementById('format').value = 'custom';
+                    document.getElementById('mqtt_custom_format').value = format;
+                    document.getElementById('mqttCustomFormatGroup').style.display = 'block';
+                }
+                document.getElementById('split').value = (mqtt.split === true).toString();
+                document.getElementById('js_transform').value = mqtt.js_transform || '';
             }
         }
 
         async function saveMqtt() {
+            let format = document.getElementById('format').value;
+            if (format === 'custom') {
+                format = document.getElementById('mqtt_custom_format').value;
+            }
             const mqtt = {
                 enabled: document.getElementById('enabled').value === 'true',
                 broker: document.getElementById('broker').value,
@@ -626,7 +661,9 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 client_id: document.getElementById('client_id').value,
                 qos: parseInt(document.getElementById('qos').value),
                 retain: document.getElementById('retain').value === 'true',
-                format: document.getElementById('format').value
+                format: format,
+                split: document.getElementById('split').value === 'true',
+                js_transform: document.getElementById('js_transform').value
             };
 
             const response = await fetch('/api/config', {
@@ -640,10 +677,17 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
         }
 
         async function testMqtt() {
+            let format = document.getElementById('format').value;
+            if (format === 'custom') {
+                format = document.getElementById('mqtt_custom_format').value;
+            }
             const mqtt = {
                 broker: document.getElementById('broker').value,
                 port: parseInt(document.getElementById('port').value),
-                client_id: document.getElementById('client_id').value
+                client_id: document.getElementById('client_id').value,
+                format: format,
+                split: document.getElementById('split').value === 'true',
+                js_transform: document.getElementById('js_transform').value
             };
 
             const response = await fetch('/api/mqtt/test', {
@@ -1247,7 +1291,7 @@ func (ws *WebServer) handleRtdbTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := client.Send(testMessage); err != nil {
+	if err := client.Send(testMessage, "测试"); err != nil {
 		ws.writeJSON(w, false, fmt.Sprintf("RTDB发送失败: %v", err), nil)
 		return
 	}
@@ -1494,6 +1538,9 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 		if jsTransform, ok := mqttData["js_transform"].(string); ok {
 			config.MqttConfig.JsTransform = jsTransform
+		}
+		if split, ok := mqttData["split"].(bool); ok {
+			config.MqttConfig.Split = split
 		}
 	}
 
