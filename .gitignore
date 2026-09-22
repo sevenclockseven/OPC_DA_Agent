@@ -19,6 +19,7 @@ go_collector/collector
 
 # C#
 .vs/
+packages/
 *.user
 *.suo
 *.userosscache

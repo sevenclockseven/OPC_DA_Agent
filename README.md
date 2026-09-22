@@ -32,6 +32,7 @@ MQTT Broker / 下游系统
 OPC_DA_Agent/
 ├── csharp_agent/              # Windows 代理 (C# .NET 4.0，必须 x86 编译)
 │   ├── Program.cs
+│   ├── MainForm.cs            # 状态窗口 + 系统托盘
 │   ├── Config.cs
 │   ├── Logger.cs
 │   ├── DataModel.cs
@@ -66,13 +67,15 @@ cd bin\Release
 OPC_DA_Agent.exe --config config.json
 ```
 
+启动后显示状态窗口（连接状态、标签数、读取/错误计数等），窗口内可一键打开 Web UI 与日志；**点关闭按钮 = 最小化到托盘继续运行**，右键托盘图标可打开主界面或退出。命令行参数见 `--help`（含 `--exit-on-close`：关闭窗口直接退出、不驻留托盘）。
+
 Web UI: `http://<ip>:8080/`（浏览 OPC 节点、选点、手动添加 ItemID、导入/导出标签）
 
 > 必须 x86 编译：OPC Automation 的 CLSID `{28E68F9A-8D75-11D1-8DC3-3C302A000000}` 是 32 位进程内 COM，64 位进程在 64 位系统下看不到 WOW6432Node 中注册的它，会报 `REGDB_E_CLASSNOTREG (0x80040154)`。
 
-#### 以 Windows 服务方式运行（无控制台窗口）
+#### 以 Windows 服务方式运行（无窗口）
 
-若要在后台无窗口、开机自启、崩溃自重启地运行，推荐用 [NSSM](https://nssm.cc/)（Non-Sucking Service Manager）把现有控制台程序包装成服务。**无需改动代码**——程序已支持 Ctrl+C 优雅退出，NSSM 停止服务时默认发送 Ctrl+C，会触发同一套 `CancelKeyPress` → `Cleanup()` 清理逻辑。
+若要在后台无窗口、开机自启、崩溃自重启地运行，推荐用 [NSSM](https://nssm.cc/)（Non-Sucking Service Manager）把程序包装成服务。**无需改动代码**——程序是窗口程序（WinExe），NSSM 停止服务时发送 `WM_CLOSE` 关闭消息；程序检测到自己运行在服务会话（Session 0）时会**直接退出并执行 `Cleanup()` 清理逻辑**（桌面双击运行时点 X 则是最小化到托盘、不退出，两套行为按会话自动区分）。
 
 1. 下载 NSSM，使用 **32 位** 版本 `nssm.exe`（本程序是 x86）。
 2. 安装服务（管理员 PowerShell）：
@@ -99,7 +102,7 @@ Web UI: `http://<ip>:8080/`（浏览 OPC 节点、选点、手动添加 ItemID�
    nssm remove OPC_DA_Agent confirm
    ```
 
-4. 控制台输出（启动 banner、状态刷新）会被 NSSM 捕获，可在 NSSM GUI 的 **I/O** 页把 `stdout` / `stderr` 重定向到日志文件查看。
+4. 运行日志写入 `log_file`（启动、连接失败、托盘化、退出原因均有记录），无需配置 I/O 重定向；如需捕获 `stdout` / `stderr` 可在 NSSM GUI 的 **I/O** 页重定向到文件备用。
 
 > ⚠️ **OPC DA + Session 0 注意**：服务运行在 Session 0 非交互桌面。多数 OPC 服务器（Kepware、ABB Freelance 等）只要 DCOM 身份配好即可；但**依赖“与桌面交互”或“交互式用户”的 OPC 服务器在 Session 0 下连不上**。建议服务用**专用账户**（非 LocalSystem）运行，并在“组件服务(DCOM 配置)”中给该账户授予 OPC 服务器访问权限：
 >
@@ -210,7 +213,7 @@ data: {"ts":"2026-...","values":[{"key":"<nodeId>","value":...,"quality":"Good",
 
 ## 编译 / CI
 
-- **C#**：GitHub Actions（`windows-2022`）执行 `msbuild /p:Platform=x86`；互操作程序集使用仓库内置的 `Interop.OPCAutomation.dll`（HintPath 引用），不在 CI 上重新生成，以保证 CLSID 与目标机已注册的一致。
+- **C#**：GitHub Actions（`windows-2022`）执行 `msbuild /p:Platform=x86`；互操作程序集使用仓库内置的 `Interop.OPCAutomation.dll`（HintPath 引用），不在 CI 上重新生成，以保证 CLSID 与目标机已注册的一致。构建产物（`bin/`，含 Debug 与 Release）上传为 artifact `OPC_DA_Agent_NET40`（保留 90 天），本地无 MSBuild 时可直接下载使用。
 - **Go**：`go build`（无需 CGO）。
 
 ## 文档索引
