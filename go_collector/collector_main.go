@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -509,6 +510,8 @@ type RtdbClient struct {
 	config    *RtdbConfig
 	connected bool
 	conn      net.Conn
+
+	shortKeySkipped atomic.Bool // 前缀解析跳过告警只打一次，防止逐 tick 刷屏
 }
 
 func NewRtdbClient(config *RtdbConfig) *RtdbClient {
@@ -562,7 +565,13 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	metadata, _ := message["metadata"].(map[string]map[string]interface{})
 
 	for key, value := range values {
-		line := c.formatLine(key, value, metadata[key])
+		line, ok := c.formatLine(key, value, metadata[key])
+		if !ok {
+			if c.shortKeySkipped.CompareAndSwap(false, true) {
+				log.Printf("RTDB: 键 %q 不足 5 字节，无法解析 device/component 前缀，已跳过该点（仅提示一次）", key)
+			}
+			continue
+		}
 		_, err := c.conn.Write([]byte(line + "\n"))
 		if err != nil {
 			return fmt.Errorf("发送数据失败: %v", err)
@@ -574,10 +583,18 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	return nil
 }
 
-func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]interface{}) string {
+// formatLine 渲染单点输出行；返回 ok=false 表示该点应被跳过（不发送）。
+func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]interface{}) (string, bool) {
 	format := c.config.Format
 	if format == "" {
 		format = "{key},{value},{quality},{timestamp}"
+	}
+
+	// {device}/{component} 按字节解析 key 前缀（约定 ASCII：4 字节工厂编码 + 1 字节分组）；
+	// 不足 5 字节无法解析，由调用方跳过，防止切片越界 panic
+	needPrefix := strings.Contains(format, "{device}") || strings.Contains(format, "{component}")
+	if needPrefix && len(key) < 5 {
+		return "", false
 	}
 
 	quality := 192
@@ -596,8 +613,12 @@ func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]i
 	result = strings.ReplaceAll(result, "{value}", fmt.Sprintf("%v", value))
 	result = strings.ReplaceAll(result, "{quality}", fmt.Sprintf("%d", quality))
 	result = strings.ReplaceAll(result, "{timestamp}", fmt.Sprintf("%d", timestamp))
+	if needPrefix {
+		result = strings.ReplaceAll(result, "{device}", key[:4])
+		result = strings.ReplaceAll(result, "{component}", key[4:5])
+	}
 
-	return result
+	return result, true
 }
 
 type MqttClient struct {
