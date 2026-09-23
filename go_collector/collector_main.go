@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -549,6 +550,7 @@ type MqttClient struct {
 	config    *MqttConfig
 	client    mqtt.Client
 	vm        *otto.Otto
+	vmMu      sync.Mutex
 	connected bool
 }
 
@@ -690,6 +692,9 @@ func (c *MqttClient) applyJsTransform(key string, value interface{}, quality int
 	if c.vm == nil {
 		return "", fmt.Errorf("js_transform 需要引入 github.com/robertkrimen/otto 依赖（当前构建未包含）")
 	}
+	// otto 非线程安全：多 task goroutine 并发 Publish 时 Set/Run 必须互斥
+	c.vmMu.Lock()
+	defer c.vmMu.Unlock()
 	input := map[string]interface{}{
 		"key":       key,
 		"value":     value,
