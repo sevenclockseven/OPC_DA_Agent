@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 type WebServer struct {
@@ -1773,12 +1774,41 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 	return nil
 }
 
+// testMqttConnection 真实建立一次 MQTT 连接再断开，而不是只校验配置格式（否则地址错/网络不通也会报成功）。
+// 测试用一次性唯一 ClientID：与运行中的采集器用相同 ID 连同一 broker 会互相踢下线；测完立即 Disconnect 防止残留会话。
 func testMqttConnection(config *MqttConfig) error {
 	if config.Broker == "" {
 		return fmt.Errorf("MQTT服务器地址不能为空")
 	}
 	if config.Port <= 0 || config.Port > 65535 {
 		return fmt.Errorf("MQTT端口无效")
+	}
+
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", config.Broker, config.Port))
+	opts.SetClientID(fmt.Sprintf("opc_collector_test_%d", time.Now().UnixNano()))
+	opts.SetCleanSession(true)
+	opts.SetAutoReconnect(false)
+	opts.SetConnectRetry(false)
+	opts.SetConnectTimeout(5 * time.Second)
+	if config.Username != "" {
+		opts.SetUsername(config.Username)
+	}
+	if config.Password != "" {
+		opts.SetPassword(config.Password)
+	}
+
+	client := mqtt.NewClient(opts)
+	token := client.Connect()
+	if !token.WaitTimeout(6 * time.Second) {
+		return fmt.Errorf("MQTT连接超时（6秒）")
+	}
+	if token.Error() != nil {
+		return token.Error()
+	}
+	defer client.Disconnect(250)
+	if !client.IsConnected() {
+		return fmt.Errorf("MQTT连接未建立")
 	}
 	return nil
 }
