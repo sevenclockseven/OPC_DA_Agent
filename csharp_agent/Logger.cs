@@ -22,7 +22,7 @@ namespace OPC_DA_Agent
     public class Logger : IDisposable
     {
         private readonly string _logFile;
-        private readonly LogLevel _minLevel;
+        private LogLevel _minLevel;
         private readonly object _lock = new object();
         private readonly StreamWriter _writer;
         private readonly bool _consoleOutput;
@@ -74,6 +74,11 @@ namespace OPC_DA_Agent
                 default:
                     return LogLevel.Info;
             }
+        }
+
+        public void SetLevel(string level)
+        {
+            _minLevel = ParseLogLevel(level);
         }
 
         public void Debug(string message)

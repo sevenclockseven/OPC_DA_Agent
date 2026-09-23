@@ -15,7 +15,7 @@ namespace OPC_DA_Agent
         private readonly OPCService _opcService;
         private readonly Logger _logger;
         private readonly Config _config;
-        private readonly CancellationTokenSource _cts;
+        private CancellationTokenSource _cts;
         private bool _isRunning;
 
         private long _requestCount = 0;
@@ -46,6 +46,8 @@ namespace OPC_DA_Agent
                 _logger.Warn("HTTP服务器已在运行中");
                 return true;
             }
+
+            _cts = new CancellationTokenSource();
 
             string bind = string.IsNullOrEmpty(_config.HttpBindIp) ? "localhost" : _config.HttpBindIp;
             if (bind == "0.0.0.0" || bind == "+") bind = "+";
@@ -93,6 +95,8 @@ namespace OPC_DA_Agent
             if (_listener != null)
             {
                 try { _listener.Stop(); } catch { }
+                try { _listener.Close(); } catch { }
+                _listener = null;
             }
             _logger.Info("HTTP服务器已停止");
         }

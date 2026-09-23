@@ -21,6 +21,7 @@ namespace OPC_DA_Agent
         private Dictionary<string, object> _lastValues = new Dictionary<string, object>();
         private Timer _updateTimer;
         private object _lock = new object();
+        private readonly object _reconnectLock = new object();
         private readonly SemaphoreSlim _browseSemaphore = new SemaphoreSlim(1, 1);
 
         private Array _serverHandles;
@@ -185,9 +186,13 @@ namespace OPC_DA_Agent
 
                 _opcGroup.DataChange += OnDataChange;
 
-                _sseRunning = true;
-                _ssePublisher = new Thread(SsePublishLoop) { IsBackground = true, Name = "SsePublisher" };
-                _ssePublisher.Start();
+                // 重连会再次进入本方法：SSE 发布线程若已运行则复用，避免双线程同时消费队列
+                if (!_sseRunning)
+                {
+                    _sseRunning = true;
+                    _ssePublisher = new Thread(SsePublishLoop) { IsBackground = true, Name = "SsePublisher" };
+                    _ssePublisher.Start();
+                }
 
                 // 确定性秒级采样时钟：按固定节拍把当前最新值全量推一次 SSE，保证值不变时也持续采集。
                 // 用缓存的 _lastValues 直接做快照，不发起任何 COM 调用，避免占用/阻塞 OPC 的 STA 线程。
@@ -313,6 +318,93 @@ namespace OPC_DA_Agent
                 _sseClients.Clear();
             }
             _logger.Info("OPC数据采集已停止");
+        }
+
+        /// <summary>
+        /// 按当前配置重连：拆除旧连接（保留 SSE 通道与发布线程）后重建连接与订阅。
+        /// 用于设置窗口修改 OPC 服务器地址后的热切换。
+        /// </summary>
+        public bool Reconnect()
+        {
+            lock (_reconnectLock)
+            {
+                _logger.Info(string.Format("按当前配置重连OPC服务器: {0}", _config.OpcServerProgId));
+                TeardownConnection();
+                if (!Connect()) return false;
+                return Start();
+            }
+        }
+
+        private void TeardownConnection()
+        {
+            if (_snapshotTimer != null)
+            {
+                try { _snapshotTimer.Dispose(); } catch { }
+                _snapshotTimer = null;
+            }
+            if (_opcGroup != null)
+            {
+                try { _opcGroup.DataChange -= OnDataChange; } catch { }
+            }
+            if (_opcGroups != null && _opcGroup != null)
+            {
+                try { _opcGroups.Remove("DataGroup"); } catch { }
+            }
+            _opcGroup = null;
+            _opcItems = null;
+            _opcGroups = null;
+            _serverHandles = null;
+            lock (_lock)
+            {
+                _lastValues.Clear();
+                _clientHandleNodes = new List<string>();
+            }
+            if (_opcServer != null)
+            {
+                try { _opcServer.Disconnect(); } catch { }
+                _opcServer = null;
+            }
+            _logger.Info("OPC旧连接已拆除（SSE通道保持，采集器不断流）");
+        }
+
+        public void ApplyUpdateRate()
+        {
+            if (_opcGroup == null) return;
+            try
+            {
+                _opcGroup.UpdateRate = _config.UpdateInterval;
+                _logger.Info(string.Format("OPC组更新频率已应用: {0}ms", _config.UpdateInterval));
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("应用OPC组更新频率失败", ex);
+            }
+        }
+
+        public void ApplySseInterval()
+        {
+            var interval = _config.SseSnapshotIntervalMs;
+            lock (_lock)
+            {
+                if (interval > 0)
+                {
+                    if (_snapshotTimer != null)
+                    {
+                        _snapshotTimer.Change(interval, interval);
+                    }
+                    else
+                    {
+                        _snapshotTimer = new System.Threading.Timer(SnapshotTick, null, interval, interval);
+                    }
+                    _logger.Info(string.Format("SSE快照间隔已应用: {0}ms", interval));
+                }
+                else if (_snapshotTimer != null)
+                {
+                    _snapshotTimer.Dispose();
+                    _snapshotTimer = null;
+                    _logger.Info("SSE秒级快照已关闭");
+                }
+            }
         }
 
         private void OnDataChange(int transactionId, int numItems, ref Array clientHandles,

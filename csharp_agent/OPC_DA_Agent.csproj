@@ -68,6 +68,7 @@
     <!-- Main project files -->
     <Compile Include="Program.cs" />
     <Compile Include="MainForm.cs" />
+    <Compile Include="SettingsForm.cs" />
     <Compile Include="Config.cs" />
     <Compile Include="Logger.cs" />
     <Compile Include="OPCService.cs" />

@@ -68,7 +68,7 @@ namespace OPC_DA_Agent
                 _logger.Info($"系统信息 | OPC服务器: {_config.OpcServerUrl} | HTTP端口: {_config.HttpPort} | 更新间隔: {_config.UpdateInterval}ms | 日志文件: {_config.LogFile}");
 
                 // 桌面消息循环：窗口关闭默认最小化到托盘继续运行，退出时才结束循环并走 finally Cleanup
-                using (var mainForm = new MainForm(_config, _opcService, _logger, _exitOnClose))
+                using (var mainForm = new MainForm(_config, _opcService, _logger, _exitOnClose, _httpServer, configPath))
                 {
                     Application.Run(mainForm);
                 }

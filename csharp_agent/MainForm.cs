@@ -15,6 +15,8 @@ namespace OPC_DA_Agent
         private readonly Config _config;
         private readonly OPCService _opcService;
         private readonly Logger _logger;
+        private readonly HttpServer _httpServer;
+        private readonly string _configPath;
 
         private readonly Timer _statusTimer;
         private NotifyIcon _trayIcon;
@@ -32,11 +34,13 @@ namespace OPC_DA_Agent
 
         private bool _exitRequested;
 
-        public MainForm(Config config, OPCService opcService, Logger logger, bool exitOnClose)
+        public MainForm(Config config, OPCService opcService, Logger logger, bool exitOnClose, HttpServer httpServer, string configPath)
         {
             _config = config;
             _opcService = opcService;
             _logger = logger;
+            _httpServer = httpServer;
+            _configPath = configPath;
             _exitRequested = exitOnClose;
 
             BuildUi();
@@ -116,6 +120,12 @@ namespace OPC_DA_Agent
             buttons.FlowDirection = FlowDirection.RightToLeft;
             buttons.WrapContents = false;
             buttons.Padding = new Padding(0, 8, 0, 0);
+
+            var btnConfig = new Button();
+            btnConfig.Text = "配置...";
+            btnConfig.AutoSize = true;
+            btnConfig.Click += OnBtnConfigClick;
+            buttons.Controls.Add(btnConfig);
 
             var btnWeb = new Button();
             btnWeb.Text = "打开 Web UI";
@@ -274,6 +284,15 @@ namespace OPC_DA_Agent
             _exitRequested = true;
             _logger?.Info("托盘退出请求");
             Close();
+        }
+
+        private void OnBtnConfigClick(object sender, EventArgs e)
+        {
+            using (var dlg = new SettingsForm(_config, _configPath, _logger, _opcService, _httpServer))
+            {
+                dlg.ShowDialog(this);
+            }
+            RefreshStatus();
         }
 
         private void OnBtnWebClick(object sender, EventArgs e)
