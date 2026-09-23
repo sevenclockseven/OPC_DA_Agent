@@ -208,6 +208,10 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                     <input type="text" id="httpUrl" placeholder="例：http://192.168.1.100:8080/api/data">
                 </div>
                 <div class="form-group">
+                    <label>访问令牌(选填)</label>
+                    <input type="text" id="httpToken" placeholder="对应目标代理 api_token，留空=不带令牌">
+                </div>
+                <div class="form-group">
                     <label>请求方法</label>
                     <select id="httpMethod">
                         <option value="GET">GET</option>
@@ -260,6 +264,7 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                     'URL: ' + (config.url || '未配置') + '<br>' +
                     '方法: ' + (config.method || 'GET') + '<br>' +
                     '超时: ' + (config.timeout || 5000) + 'ms' +
+                    (config.token ? '<br>令牌: 已配置' : '') +
                     '</div>' +
                     '<div class="http-actions">' +
                     '<button class="btn btn-edit" onclick="editHttp(' + index + ')">编辑</button>' +
@@ -278,12 +283,14 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('httpName').value = config.name || '';
                 document.getElementById('httpEnabled').value = config.enabled ? 'true' : 'false';
                 document.getElementById('httpUrl').value = config.url || '';
+                document.getElementById('httpToken').value = config.token || '';
                 document.getElementById('httpMethod').value = config.method || 'GET';
                 document.getElementById('httpTimeout').value = config.timeout || 5000;
             } else {
                 document.getElementById('httpName').value = '';
                 document.getElementById('httpEnabled').value = 'true';
                 document.getElementById('httpUrl').value = '';
+                document.getElementById('httpToken').value = '';
                 document.getElementById('httpMethod').value = 'GET';
                 document.getElementById('httpTimeout').value = 5000;
             }
@@ -308,6 +315,7 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                 name: name,
                 enabled: document.getElementById('httpEnabled').value === 'true',
                 url: url,
+                token: document.getElementById('httpToken').value.trim(),
                 method: document.getElementById('httpMethod').value,
                 timeout: parseInt(document.getElementById('httpTimeout').value) || 5000
             };
@@ -1643,6 +1651,9 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 				if url, ok := httpData["url"].(string); ok {
 					httpConfig.Url = url
 				}
+				if token, ok := httpData["token"].(string); ok {
+					httpConfig.Token = token
+				}
 				if method, ok := httpData["method"].(string); ok {
 					httpConfig.Method = method
 				}
@@ -1782,6 +1793,7 @@ func testHttpConnection(config *HttpConfig) error {
 	if err != nil {
 		return err
 	}
+	applyApiToken(req, config.Token)
 
 	resp, err := client.Do(req)
 	if err != nil {

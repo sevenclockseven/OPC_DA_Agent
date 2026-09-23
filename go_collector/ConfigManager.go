@@ -56,6 +56,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		httpConfig.Url = section.Key("url").String()
 		httpConfig.Method = section.Key("method").String()
 		httpConfig.Timeout, _ = section.Key("timeout").Int()
+		httpConfig.Token = section.Key("token").String()
 		config.HttpConfigs = append(config.HttpConfigs, httpConfig)
 	}
 
@@ -70,6 +71,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 			httpConfig.Url = section.Key("url").String()
 			httpConfig.Method = section.Key("method").String()
 			httpConfig.Timeout, _ = section.Key("timeout").Int()
+			httpConfig.Token = section.Key("token").String()
 			config.HttpConfigs = append(config.HttpConfigs, httpConfig)
 		}
 	}
@@ -216,6 +218,9 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		section.NewKey("url", httpConfig.Url)
 		section.NewKey("method", httpConfig.Method)
 		section.NewKey("timeout", fmt.Sprintf("%d", httpConfig.Timeout))
+		if httpConfig.Token != "" {
+			section.NewKey("token", httpConfig.Token)
+		}
 	}
 
 	if config.RtdbConfig != nil {
@@ -296,6 +301,9 @@ func (cm *ConfigManager) ToIniString(config *AppConfig) string {
 		section.NewKey("url", httpConfig.Url)
 		section.NewKey("method", httpConfig.Method)
 		section.NewKey("timeout", fmt.Sprintf("%d", httpConfig.Timeout))
+		if httpConfig.Token != "" {
+			section.NewKey("token", httpConfig.Token)
+		}
 	}
 
 	for i, task := range config.Tasks {

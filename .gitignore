@@ -16,6 +16,7 @@ bin/Release/
 *.out
 go.work
 go_collector/collector
+go_collector/dist/
 
 # C#
 .vs/
