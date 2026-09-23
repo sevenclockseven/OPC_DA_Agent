@@ -158,7 +158,6 @@ func NewCollector(config *AppConfig) *Collector {
 func (c *Collector) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelFunc = cancel
-	c.running = true
 
 	c.httpClients = make([]*HttpClient, 0)
 	for _, httpConfig := range c.config.HttpConfigs {
@@ -206,6 +205,7 @@ func (c *Collector) Start() error {
 		}
 	}
 
+	c.running = true
 	return nil
 }
 
@@ -226,11 +226,19 @@ func (c *Collector) Stop() {
 	fmt.Println("采集器已停止")
 }
 
-func (c *Collector) Reload(newConfig *AppConfig) {
+func (c *Collector) Reload(newConfig *AppConfig) error {
+	oldConfig := c.config
 	c.Stop()
 	c.config = newConfig
-	c.Start()
+	if err := c.Start(); err != nil {
+		c.config = oldConfig
+		if rbErr := c.Start(); rbErr != nil {
+			log.Printf("回滚旧配置后重启仍失败: %v", rbErr)
+		}
+		return fmt.Errorf("热加载失败（运行时已回滚旧配置）: %v", err)
+	}
 	log.Println("✅ 配置已热加载")
+	return nil
 }
 
 func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {

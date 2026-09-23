@@ -1326,10 +1326,14 @@ func (ws *WebServer) handleUpdateConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if ws.collector != nil {
-		ws.collector.Reload(config)
-	}
+	// 文件已保存即以新令牌对外服务，再热加载数据面；热加载失败如实返回并回滚运行时
 	ws.webToken = config.WebToken
+	if ws.collector != nil {
+		if err := ws.collector.Reload(config); err != nil {
+			ws.writeJSON(w, false, fmt.Sprintf("配置已保存到文件，但热加载失败: %v（重启后将应用新配置，请先修正错误）", err), nil)
+			return
+		}
+	}
 
 	ws.writeJSON(w, true, "配置已更新", nil)
 }
