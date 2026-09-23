@@ -2,14 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 type KeyTransformer struct {
-	rules  []TransformRule
+	mu      sync.Mutex
+	rules   []TransformRule
 	enabled bool
+	reCache map[string]*regexp.Regexp
+	reBad   map[string]bool
 }
 
 type TransformRule struct {
@@ -22,16 +27,18 @@ type TransformRule struct {
 }
 
 type TransformConfig struct {
-	Enabled        bool           `json:"enabled"`
-	DefaultPrefix  string         `json:"default_prefix"`
-	DefaultSuffix  string         `json:"default_suffix"`
-	Rules          []TransformRule `json:"rules"`
+	Enabled       bool            `json:"enabled"`
+	DefaultPrefix string          `json:"default_prefix"`
+	DefaultSuffix string          `json:"default_suffix"`
+	Rules         []TransformRule `json:"rules"`
 }
 
 func NewKeyTransformer() *KeyTransformer {
 	return &KeyTransformer{
 		rules:   []TransformRule{},
 		enabled: true,
+		reCache: make(map[string]*regexp.Regexp),
+		reBad:   make(map[string]bool),
 	}
 }
 
@@ -46,20 +53,28 @@ func (kt *KeyTransformer) LoadFromFile(path string) error {
 		return err
 	}
 
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	kt.enabled = config.Enabled
 	kt.rules = config.Rules
 	return nil
 }
 
 func (kt *KeyTransformer) SetEnabled(enabled bool) {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	kt.enabled = enabled
 }
 
 func (kt *KeyTransformer) IsEnabled() bool {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	return kt.enabled
 }
 
 func (kt *KeyTransformer) AddRule(rule TransformRule) {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	kt.rules = append(kt.rules, rule)
 }
 
@@ -67,6 +82,9 @@ func (kt *KeyTransformer) Transform(originalKey string) string {
 	if originalKey == "" {
 		return originalKey
 	}
+
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 
 	if !kt.enabled {
 		return originalKey
@@ -84,6 +102,7 @@ func (kt *KeyTransformer) Transform(originalKey string) string {
 	return result
 }
 
+// applyRule 必须在持有 kt.mu 的前提下调用。
 func (kt *KeyTransformer) applyRule(key string, rule TransformRule) string {
 	switch rule.RuleType {
 	case "RemovePrefix":
@@ -108,11 +127,14 @@ func (kt *KeyTransformer) applyRule(key string, rule TransformRule) string {
 		return strings.ReplaceAll(key, rule.Pattern, rule.Replacement)
 
 	case "RegexReplace":
-		if rule.Pattern != "" {
-			re := regexp.MustCompile(rule.Pattern)
-			return re.ReplaceAllString(key, rule.Replacement)
+		if rule.Pattern == "" {
+			return key
 		}
-		return key
+		re := kt.compileLocked(rule.Pattern)
+		if re == nil {
+			return key
+		}
+		return re.ReplaceAllString(key, rule.Replacement)
 
 	case "ToLower":
 		return strings.ToLower(key)
@@ -137,21 +159,48 @@ func (kt *KeyTransformer) applyRule(key string, rule TransformRule) string {
 	}
 }
 
+// compileLocked 缓存正则编译结果；无效 pattern 返回 nil 并只告警一次，
+// 跳过该规则而不是用 MustCompile 让坏配置把采集器 panic 打崩。
+func (kt *KeyTransformer) compileLocked(pattern string) *regexp.Regexp {
+	if re, ok := kt.reCache[pattern]; ok {
+		return re
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		if !kt.reBad[pattern] {
+			kt.reBad[pattern] = true
+			log.Printf("键名映射正则无效，已跳过规则 %q: %v", pattern, err)
+		}
+		kt.reCache[pattern] = nil
+		return nil
+	}
+	kt.reCache[pattern] = re
+	return re
+}
+
 func (kt *KeyTransformer) ExportRules() []TransformRule {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	return append([]TransformRule{}, kt.rules...)
 }
 
 func (kt *KeyTransformer) ImportRules(rules []TransformRule) {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	kt.rules = append([]TransformRule{}, rules...)
 }
 
 func (kt *KeyTransformer) ClearRules() {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	kt.rules = []TransformRule{}
 }
 
 func (kt *KeyTransformer) GetStatus() map[string]interface{} {
+	kt.mu.Lock()
+	defer kt.mu.Unlock()
 	return map[string]interface{}{
-		"enabled":   kt.enabled,
+		"enabled":    kt.enabled,
 		"rule_count": len(kt.rules),
 	}
 }
