@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -21,7 +22,7 @@ type WebServer struct {
 	configManager *ConfigManager
 	transformer   *KeyTransformer
 	collector     *Collector
-	webToken      string
+	webToken      atomic.Value // string；middleware 每请求读与配置热更写并发，需原子存取
 	webPort       int
 }
 
@@ -38,7 +39,7 @@ func NewWebServer(configPath string, collector *Collector) *WebServer {
 func (ws *WebServer) Start(port int) error {
 	ws.webPort = port
 	if cfg := ws.configManager.Load(ws.configPath); cfg != nil {
-		ws.webToken = cfg.WebToken
+		ws.webToken.Store(cfg.WebToken)
 	}
 
 	r := mux.NewRouter()
@@ -1173,12 +1174,12 @@ func (ws *WebServer) securityMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if ws.webToken != "" && strings.HasPrefix(r.URL.Path, "/api/") {
+		if tok, _ := ws.webToken.Load().(string); tok != "" && strings.HasPrefix(r.URL.Path, "/api/") {
 			provided := r.Header.Get("X-Api-Token")
 			if provided == "" {
 				provided = r.URL.Query().Get("token")
 			}
-			if !secureCompare(ws.webToken, provided) {
+			if !secureCompare(tok, provided) {
 				ws.writeJSONStatus(w, http.StatusUnauthorized, false, "未授权：缺少或错误的访问令牌", nil)
 				return
 			}
@@ -1327,7 +1328,7 @@ func (ws *WebServer) handleUpdateConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 文件已保存即以新令牌对外服务，再热加载数据面；热加载失败如实返回并回滚运行时
-	ws.webToken = config.WebToken
+	ws.webToken.Store(config.WebToken)
 	if ws.collector != nil {
 		if err := ws.collector.Reload(config); err != nil {
 			ws.writeJSON(w, false, fmt.Sprintf("配置已保存到文件，但热加载失败: %v（重启后将应用新配置，请先修正错误）", err), nil)

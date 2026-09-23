@@ -135,6 +135,7 @@ func waitForShutdown() {
 }
 
 type Collector struct {
+	mu          sync.RWMutex
 	config      *AppConfig
 	httpClients []*HttpClient
 	mqttClient  *MqttClient
@@ -155,7 +156,18 @@ func NewCollector(config *AppConfig) *Collector {
 	}
 }
 
+// snapshot 在读锁下取运行态引用副本；任务 goroutine 全程只用副本，
+// 避免与热加载 Reload/Start/Stop 的字段写构成 data race。
+func (c *Collector) snapshot() (httpClients []*HttpClient, mqtt *MqttClient, rtdb *RtdbClient) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.httpClients, c.mqttClient, c.rtdbClient
+}
+
 func (c *Collector) Start() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelFunc = cancel
 
@@ -210,6 +222,9 @@ func (c *Collector) Start() error {
 }
 
 func (c *Collector) Stop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.running = false
 	if c.cancelFunc != nil {
 		c.cancelFunc()
@@ -227,11 +242,15 @@ func (c *Collector) Stop() {
 }
 
 func (c *Collector) Reload(newConfig *AppConfig) error {
-	oldConfig := c.config
 	c.Stop()
+	c.mu.Lock()
+	oldConfig := c.config
 	c.config = newConfig
+	c.mu.Unlock()
 	if err := c.Start(); err != nil {
+		c.mu.Lock()
 		c.config = oldConfig
+		c.mu.Unlock()
 		if rbErr := c.Start(); rbErr != nil {
 			log.Printf("回滚旧配置后重启仍失败: %v", rbErr)
 		}
@@ -244,7 +263,8 @@ func (c *Collector) Reload(newConfig *AppConfig) error {
 func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {
 	// 数据源 URL 含 /api/stream 时走 SSE 订阅推送，否则保持原有定时轮询
 	if tr.task.HttpSource != "" {
-		for _, client := range collector.httpClients {
+		httpClients, _, _ := collector.snapshot()
+		for _, client := range httpClients {
 			if client.config.Name == tr.task.HttpSource && strings.Contains(client.config.Url, "/api/stream") {
 				tr.runSse(ctx, collector, client)
 				return
@@ -395,9 +415,10 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 	tr.transformer.LoadFromFile(transformFile)
 
 	var rawData []map[string]interface{}
+	httpClients, _, _ := collector.snapshot()
 
 	if tr.task.HttpSource != "" {
-		for _, client := range collector.httpClients {
+		for _, client := range httpClients {
 			if client.config.Name == tr.task.HttpSource {
 				fetched, err := collector.fetchFromHttp(client)
 				if err != nil {
@@ -408,8 +429,8 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 				break
 			}
 		}
-	} else if len(collector.httpClients) > 0 {
-		for _, client := range collector.httpClients {
+	} else if len(httpClients) > 0 {
+		for _, client := range httpClients {
 			fetched, err := collector.fetchFromHttp(client)
 			if err != nil {
 				log.Printf("HTTP[%s]获取数据失败: %v", client.config.Name, err)
@@ -459,14 +480,15 @@ func (tr *TaskRunner) processAndPublish(collector *Collector, rawData []map[stri
 		"metadata":  metadata,
 	}
 
-	if collector.mqttClient != nil && collector.mqttClient.IsConnected() {
-		if err := collector.mqttClient.Publish(msg, tr.task.HttpSource); err != nil {
+	_, mqttC, rtdbC := collector.snapshot()
+	if mqttC != nil && mqttC.IsConnected() {
+		if err := mqttC.Publish(msg, tr.task.HttpSource); err != nil {
 			log.Printf("MQTT发送失败: %v", err)
 		}
 	}
 
-	if collector.rtdbClient != nil && collector.rtdbClient.IsConnected() {
-		if err := collector.rtdbClient.Send(msg, tr.task.HttpSource); err != nil {
+	if rtdbC != nil && rtdbC.IsConnected() {
+		if err := rtdbC.Send(msg, tr.task.HttpSource); err != nil {
 			log.Printf("RTDB发送失败: %v", err)
 		}
 	}
