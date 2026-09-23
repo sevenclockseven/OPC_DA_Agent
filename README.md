@@ -237,12 +237,16 @@ data: {"ts":"2026-...","values":[{"key":"<nodeId>","value":...,"quality":"Good",
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET  | `/api/config` | 获取配置 |
-| POST | `/api/config` | 更新配置 |
-| GET  | `/api/config/import` | 导入配置 |
-| GET  | `/api/config/export` | 导出配置 |
+| POST | `/api/config` | 更新配置（热加载，失败会回滚并如实返回错误） |
+| POST | `/api/config/validate` | 校验配置 |
 | POST | `/api/mqtt/test` | 测试 MQTT 连接 |
-| GET  | `/api/status` | 运行状态 |
-| GET  | `/api/data` | 最近一次采集数据 |
+| POST | `/api/rtdb/test` | 测试 RTDB 连接 |
+| POST | `/api/http/test` | 测试 HTTP 数据源连接 |
+| POST | `/api/transform/preview` | 预览键名转换效果 |
+| GET  | `/api/transform/rules` | 获取转换规则 |
+| POST | `/api/transform/rules` | 保存转换规则（同步调试面板） |
+| GET  | `/api/transform/debug` | 转换调试信息（规则/样例测试） |
+| POST | `/api/webhook/test` | 测试 Webhook 推送 |
 
 以上 `/api/*` 在配置 `web_token` 后均需携带令牌（见「安全 / API 认证」）；`/` 页面豁免。
 
