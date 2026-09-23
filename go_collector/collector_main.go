@@ -269,6 +269,16 @@ func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {
 	}
 }
 
+// sseHTTPClient SSE 专用客户端：不设总超时（长连接需持续读），仅拨号阶段 10 秒上限，
+// 防止黑洞地址让订阅任务永久挂死；配合带 ctx 的请求，Stop/热加载可立即断开。
+var sseHTTPClient = &http.Client{
+	Transport: func() http.RoundTripper {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.DialContext = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
+		return tr
+	}(),
+}
+
 func (tr *TaskRunner) runSse(ctx context.Context, collector *Collector, client *HttpClient) {
 	backoff := time.Second
 	for {
@@ -280,14 +290,14 @@ func (tr *TaskRunner) runSse(ctx context.Context, collector *Collector, client *
 
 		streamURL := client.config.Url
 		log.Printf("SSE 连接 %s", streamURL)
-		req, err := http.NewRequest("GET", streamURL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", streamURL, nil)
 		if err != nil {
 			log.Printf("SSE 请求创建失败: %v", err)
 			time.Sleep(backoff)
 			continue
 		}
 		applyApiToken(req, client.config.Token)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := sseHTTPClient.Do(req)
 		if err != nil {
 			log.Printf("SSE 连接失败: %v", err)
 			time.Sleep(backoff)
