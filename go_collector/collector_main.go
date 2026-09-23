@@ -509,7 +509,10 @@ func (tr *TaskRunner) processAndPublish(collector *Collector, rawData []map[stri
 type RtdbClient struct {
 	config    *RtdbConfig
 	connected bool
-	conn      net.Conn
+	// conns/addrs 双写目标：Host 支持逗号分隔多个地址，同 format 同批写入；
+	// 部分地址不可达时保留可用连接继续发送（冗余双写），全部不可达才视为未连接
+	conns []net.Conn
+	addrs []string
 
 	shortKeySkipped atomic.Bool // 前缀解析跳过告警只打一次，防止逐 tick 刷屏
 }
@@ -525,31 +528,55 @@ func (c *RtdbClient) Connect() error {
 		return fmt.Errorf("RTDB地址或端口未配置")
 	}
 
-	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	if err != nil {
-		return fmt.Errorf("连接RTDB失败: %v", err)
+	var targets []string
+	for _, h := range strings.Split(c.config.Host, ",") {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			targets = append(targets, fmt.Sprintf("%s:%d", h, c.config.Port))
+		}
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("RTDB地址或端口未配置")
 	}
 
-	c.conn = conn
+	c.conns = nil
+	c.addrs = nil
+	var failed []string
+	for _, addr := range targets {
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", addr, err))
+			log.Printf("⚠️ RTDB %s 连接失败: %v（继续尝试其余地址）", addr, err)
+			continue
+		}
+		c.conns = append(c.conns, conn)
+		c.addrs = append(c.addrs, addr)
+		log.Printf("✅ RTDB已连接到 %s", addr)
+	}
+
+	if len(c.conns) == 0 {
+		return fmt.Errorf("连接RTDB失败: %s", strings.Join(failed, "; "))
+	}
 	c.connected = true
-	log.Printf("✅ RTDB已连接到 %s", addr)
 	return nil
 }
 
 // Disconnect 幂等：未连接/重复调用直接返回，防止 defer 与 Stop 双关时误报日志。
 func (c *RtdbClient) Disconnect() {
-	if c.conn == nil {
+	if len(c.conns) == 0 {
 		return
 	}
-	c.conn.Close()
-	c.conn = nil
+	for _, conn := range c.conns {
+		conn.Close()
+	}
+	c.conns = nil
+	c.addrs = nil
 	c.connected = false
 	log.Println("📴 RTDB已断开")
 }
 
 func (c *RtdbClient) IsConnected() bool {
-	return c.connected
+	return c.connected && len(c.conns) > 0
 }
 
 func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
@@ -563,6 +590,9 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	}
 
 	metadata, _ := message["metadata"].(map[string]map[string]interface{})
+	failCounts := make([]int, len(c.conns))
+	sentAny := false
+	var lastErr error
 
 	for key, value := range values {
 		line, ok := c.formatLine(key, value, metadata[key])
@@ -572,11 +602,31 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 			}
 			continue
 		}
-		_, err := c.conn.Write([]byte(line + "\n"))
-		if err != nil {
-			return fmt.Errorf("发送数据失败: %v", err)
+		data := []byte(line + "\n")
+		lineSent := false
+		for i, conn := range c.conns {
+			if _, err := conn.Write(data); err != nil {
+				failCounts[i]++
+				lastErr = err
+				continue
+			}
+			lineSent = true
 		}
+		// 双写语义：单地址写失败不中断本批，继续向其余地址投递后续行
+		if !lineSent {
+			continue
+		}
+		sentAny = true
 		log.Printf("RTDB发送 [数据源:%s]: %s", source, line)
+	}
+
+	for i, n := range failCounts {
+		if n > 0 && i < len(c.addrs) {
+			log.Printf("⚠️ RTDB[%s] 本批 %d 行写入失败", c.addrs[i], n)
+		}
+	}
+	if !sentAny {
+		return fmt.Errorf("发送数据失败: 全部 %d 个地址均不可写（最后错误: %v）", len(c.conns), lastErr)
 	}
 
 	log.Printf("📤 RTDB发送成功 [数据源:%s] %d 条", source, len(values))
