@@ -20,6 +20,7 @@ namespace OPC_DA_Agent
 
         private readonly Timer _statusTimer;
         private NotifyIcon _trayIcon;
+        private Icon _appIcon;
 
         private Label _lblConn;
         private Label _lblUptime;
@@ -42,6 +43,7 @@ namespace OPC_DA_Agent
             _httpServer = httpServer;
             _configPath = configPath;
             _exitRequested = exitOnClose;
+            _appIcon = LoadAppIcon();
 
             BuildUi();
             BuildTray();
@@ -57,6 +59,7 @@ namespace OPC_DA_Agent
         private void BuildUi()
         {
             Text = "OPC DA 数据采集代理";
+            Icon = _appIcon;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -173,7 +176,7 @@ namespace OPC_DA_Agent
             menu.Items.Add("退出(&X)", null, OnTrayExit);
 
             _trayIcon = new NotifyIcon();
-            _trayIcon.Icon = LoadAppIcon();
+            _trayIcon.Icon = _appIcon;
             _trayIcon.Text = "OPC DA 数据采集代理";
             _trayIcon.ContextMenuStrip = menu;
             _trayIcon.Visible = true;

@@ -8,6 +8,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>OPC_DA_Agent</RootNamespace>
     <AssemblyName>OPC_DA_Agent</AssemblyName>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -77,6 +78,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="icon.ico" />
+    <None Include="icon.svg" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="OPCDAAuto.dll">
