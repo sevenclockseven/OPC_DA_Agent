@@ -77,13 +77,13 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     }
   }
 
-  function api(path, method, data, cb) {
+  function api(path, method, data, cb, timeoutMs) {
     var x = new XMLHttpRequest();
     x.open(method || 'GET', base + path);
     x.setRequestHeader('Content-Type', 'application/json');
     var token = getToken();
     if (token) x.setRequestHeader('X-Api-Token', token);
-    x.timeout = 10000;
+    x.timeout = timeoutMs || 10000;
     x.onload = function() {
       if (x.status === 401) {
         cb({success:false, message:'需要访问令牌'});
@@ -291,7 +291,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
         } else {
           alert('导入失败: ' + r.message);
         }
-      });
+      }, 30000);
     };
     reader.readAsText(file);
   }
@@ -303,7 +303,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     api('/api/tags', 'POST', { tags: tags }, function(r) {
       if (r.success) alert(r.message || '保存成功');
       else alert('保存失败: ' + r.message);
-    });
+    }, 30000);
   }
 
   function loadStatus() {

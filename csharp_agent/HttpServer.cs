@@ -75,6 +75,13 @@ namespace OPC_DA_Agent
                     _listener.Start();
                     _isRunning = true;
                     _logger.Info(string.Format("HTTP服务器已启动: http://{0}:{1}/", host, _config.HttpPort));
+                    // 期望通配符绑定却落到 localhost 是静默降级：请求在 HTTP.sys 层被拒（400）且应用层无任何日志，必须显式告警
+                    if (bind == "+" && host != "+")
+                    {
+                        _logger.Warn(string.Format(
+                            "HTTP通配绑定(+:{0})失败，已回退为 localhost：远程/IP访问将被 HTTP.sys 拒绝并返回400。请以管理员身份运行，或先执行: netsh http add urlacl url=http://+:{0}/ user=\"NT AUTHORITY\\SYSTEM\"",
+                            _config.HttpPort));
+                    }
                     _listener.BeginGetContext(OnGetContext, null);
                     return true;
                 }
