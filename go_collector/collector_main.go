@@ -515,6 +515,11 @@ type RtdbClient struct {
 	addrs []string
 
 	shortKeySkipped atomic.Bool // 前缀解析跳过告警只打一次，防止逐 tick 刷屏
+
+	// 成功路径不逐条/逐批打日志（高频刷屏），改为 atomic 累计 + 60s 窗口汇总；
+	// Send 可被多个 TaskRunner 并发调用，计数与窗口均需原子操作防 data race
+	sentTotal       atomic.Int64 // 累计成功发送行数
+	lastSummaryNano atomic.Int64 // 上次汇总日志的 UnixNano，按窗口节流
 }
 
 func NewRtdbClient(config *RtdbConfig) *RtdbClient {
@@ -558,6 +563,7 @@ func (c *RtdbClient) Connect() error {
 		return fmt.Errorf("连接RTDB失败: %s", strings.Join(failed, "; "))
 	}
 	c.connected = true
+	c.lastSummaryNano.Store(time.Now().UnixNano())
 	return nil
 }
 
@@ -572,7 +578,7 @@ func (c *RtdbClient) Disconnect() {
 	c.conns = nil
 	c.addrs = nil
 	c.connected = false
-	log.Println("📴 RTDB已断开")
+	log.Printf("📴 RTDB已断开（累计发送 %d 条）", c.sentTotal.Load())
 }
 
 func (c *RtdbClient) IsConnected() bool {
@@ -592,6 +598,7 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	metadata, _ := message["metadata"].(map[string]map[string]interface{})
 	failCounts := make([]int, len(c.conns))
 	sentAny := false
+	var batchSent int64
 	var lastErr error
 
 	for key, value := range values {
@@ -617,7 +624,7 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 			continue
 		}
 		sentAny = true
-		log.Printf("RTDB发送 [数据源:%s]: %s", source, line)
+		batchSent++
 	}
 
 	for i, n := range failCounts {
@@ -629,7 +636,13 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 		return fmt.Errorf("发送数据失败: 全部 %d 个地址均不可写（最后错误: %v）", len(c.conns), lastErr)
 	}
 
-	log.Printf("📤 RTDB发送成功 [数据源:%s] %d 条", source, len(values))
+	c.sentTotal.Add(batchSent)
+	// 每 60s 至多打一条累计汇总：CAS 保证并发 Send 下同一窗口只有一个 goroutine 输出
+	now := time.Now().UnixNano()
+	last := c.lastSummaryNano.Load()
+	if now-last >= int64(time.Minute) && c.lastSummaryNano.CompareAndSwap(last, now) {
+		log.Printf("📤 RTDB累计已发送 %d 条", c.sentTotal.Load())
+	}
 	return nil
 }
 
