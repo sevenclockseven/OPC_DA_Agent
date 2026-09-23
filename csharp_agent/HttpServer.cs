@@ -2,7 +2,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 using Newtonsoft.Json;
@@ -139,16 +142,6 @@ namespace OPC_DA_Agent
             HttpListenerRequest request = context.Request;
             HttpListenerResponse response = context.Response;
 
-            response.Headers.Add("Access-Control-Allow-Origin", "*");
-            response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-            response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
-
-            if (request.HttpMethod == "OPTIONS")
-            {
-                SendResponse(response, null, 200);
-                return;
-            }
-
             byte[] buffer = null;
             int statusCode = 200;
 
@@ -158,7 +151,21 @@ namespace OPC_DA_Agent
                 string method = request.HttpMethod;
                 string query = request.Url.Query;
 
-                _logger.Info(string.Format("[HTTP] {0} {1}{2}", method, path, query));
+                _logger.Info(string.Format("[HTTP] {0} {1}{2}", method, path, MaskToken(query)));
+
+                if (!AuthorizeRequest(request, response, path))
+                {
+                    return;
+                }
+                SetCorsHeaders(request, response);
+
+                if (method == "OPTIONS")
+                {
+                    response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                    response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, X-Api-Token");
+                    SendResponse(response, null, 200);
+                    return;
+                }
 
                 // === API 路由 ===
                 if (path == "/api/status" && method == "GET")
@@ -242,6 +249,118 @@ namespace OPC_DA_Agent
             }
 
             SendResponse(response, buffer, statusCode);
+        }
+
+        /// <summary>
+        /// 请求安全检查，顺序固定：Token（仅 /api/*，Web UI 页面壳豁免以便前端弹出令牌引导）→ Host → Origin。
+        /// 任一失败时已写出 401/403 响应并返回 false，调用方直接 return。
+        /// </summary>
+        private bool AuthorizeRequest(HttpListenerRequest request, HttpListenerResponse response, string path)
+        {
+            string required = _config.ApiToken;
+            if (!string.IsNullOrWhiteSpace(required) && path.StartsWith("/api/"))
+            {
+                string provided = request.Headers["X-Api-Token"];
+                if (string.IsNullOrEmpty(provided))
+                {
+                    provided = ExtractQuery(request.Url.Query, "token");
+                }
+                if (!FixedTimeEquals(required.Trim(), provided))
+                {
+                    SendJsonError(response, 401, "未授权：缺少或错误的访问令牌");
+                    return false;
+                }
+            }
+
+            // Host 白名单：防 DNS rebinding（攻击者域名解析到本机后，浏览器会以其域名作 Host 发起请求）
+            if (!IsAllowedHost(request.Url.Host))
+            {
+                SendJsonError(response, 403, "拒绝访问：非法的Host " + request.Url.Host);
+                return false;
+            }
+
+            // Origin 仅在存在时校验（curl/采集器不带此头），防浏览器跨站页面调用
+            string origin = request.Headers["Origin"];
+            if (!string.IsNullOrEmpty(origin) && !IsAllowedOrigin(origin))
+            {
+                SendJsonError(response, 403, "拒绝访问：非法的Origin");
+                return false;
+            }
+
+            return true;
+        }
+
+        // 仅对合法 Origin 精确回显：带 X-Api-Token 的请求不允许 ACAO 为 *
+        private void SetCorsHeaders(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string origin = request.Headers["Origin"];
+            if (!string.IsNullOrEmpty(origin) && IsAllowedOrigin(origin))
+            {
+                response.Headers.Add("Access-Control-Allow-Origin", origin);
+                response.Headers.Add("Vary", "Origin");
+            }
+        }
+
+        private bool IsAllowedOrigin(string origin)
+        {
+            Uri u;
+            if (!Uri.TryCreate(origin, UriKind.Absolute, out u)) return false;
+            if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps) return false;
+            if (u.Port != _config.HttpPort) return false;
+            return IsAllowedHost(u.Host);
+        }
+
+        private bool IsAllowedHost(string host)
+        {
+            if (string.IsNullOrEmpty(host)) return true;
+            if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+            if (host == "127.0.0.1" || host == "::1" || host == "[::1]") return true;
+            if (string.Equals(host, Environment.MachineName, StringComparison.OrdinalIgnoreCase)) return true;
+            try
+            {
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                    {
+                        if (ua.Address.AddressFamily == AddressFamily.InterNetwork
+                            && ua.Address.ToString() == host)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 枚举异常按拒绝处理（fail-closed）：正常路径已由上方 localhost/机器名/特判放行
+            }
+            return false;
+        }
+
+        // 固定时间字符串比较（.NET 4.0 无 CryptographicOperations.FixedTimeEquals，手写等价实现）
+        private static bool FixedTimeEquals(string expected, string actual)
+        {
+            if (actual == null) return false;
+            int diff = expected.Length ^ actual.Length;
+            int len = Math.Min(expected.Length, actual.Length);
+            for (int i = 0; i < len; i++)
+            {
+                diff |= expected[i] ^ actual[i];
+            }
+            return diff == 0;
+        }
+
+        // 访问日志对 token 参数打码：query 明文落盘等于令牌泄露
+        private static string MaskToken(string query)
+        {
+            if (string.IsNullOrEmpty(query)) return query;
+            return Regex.Replace(query, @"(?i)(token=)[^&]*", "$1***");
+        }
+
+        private void SendJsonError(HttpListenerResponse response, int statusCode, string message)
+        {
+            response.ContentType = "application/json; charset=utf-8";
+            SendResponse(response, Json(ApiResponse.ErrorResponse(message)), statusCode);
         }
 
         // 统一写出响应：客户端在传输中途断开（HttpListenerException）或响应已部分提交（InvalidOperationException）

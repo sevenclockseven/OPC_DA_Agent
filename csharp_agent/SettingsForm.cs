@@ -24,6 +24,7 @@ namespace OPC_DA_Agent
         private NumericUpDown _numUpdate;
         private NumericUpDown _numSnapshot;
         private ComboBox _cmbLevel;
+        private TextBox _txtToken;
 
         public SettingsForm(Config config, string configPath, Logger logger, OPCService opcService, HttpServer httpServer)
         {
@@ -44,16 +45,16 @@ namespace OPC_DA_Agent
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(450, 260);
+            ClientSize = new Size(450, 295);
             Padding = new Padding(10);
 
             var grid = new TableLayoutPanel();
             grid.Dock = DockStyle.Fill;
             grid.ColumnCount = 2;
-            grid.RowCount = 7;
+            grid.RowCount = 8;
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160F));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)
             {
                 grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 27F));
             }
@@ -88,6 +89,11 @@ namespace OPC_DA_Agent
             _cmbLevel.Items.AddRange(new object[] { "Debug", "Info", "Warn", "Error", "Fatal" });
             grid.Controls.Add(_cmbLevel, 1, 5);
 
+            grid.Controls.Add(MakeCaption("API令牌(空=关闭):"), 0, 6);
+            _txtToken = new TextBox();
+            _txtToken.Dock = DockStyle.Fill;
+            grid.Controls.Add(_txtToken, 1, 6);
+
             var buttons = new FlowLayoutPanel();
             buttons.Dock = DockStyle.Fill;
             buttons.FlowDirection = FlowDirection.RightToLeft;
@@ -108,7 +114,7 @@ namespace OPC_DA_Agent
             buttons.Controls.Add(btnCancel);
             CancelButton = btnCancel;
 
-            grid.Controls.Add(buttons, 0, 6);
+            grid.Controls.Add(buttons, 0, 7);
             grid.SetColumnSpan(buttons, 2);
 
             Controls.Add(grid);
@@ -140,6 +146,7 @@ namespace OPC_DA_Agent
             _numPort.Value = _config.HttpPort;
             _numUpdate.Value = _config.UpdateInterval;
             _numSnapshot.Value = Math.Max(0, _config.SseSnapshotIntervalMs);
+            _txtToken.Text = _config.ApiToken ?? "";
 
             var level = _config.LogLevel;
             var index = _cmbLevel.FindStringExact(level);
@@ -156,6 +163,7 @@ namespace OPC_DA_Agent
             candidate.UpdateInterval = (int)_numUpdate.Value;
             candidate.SseSnapshotIntervalMs = (int)_numSnapshot.Value;
             candidate.LogLevel = _cmbLevel.SelectedItem != null ? _cmbLevel.SelectedItem.ToString() : "Info";
+            candidate.ApiToken = _txtToken.Text.Trim();
 
             List<string> errors;
             if (!candidate.Validate(out errors))
@@ -167,6 +175,14 @@ namespace OPC_DA_Agent
             }
 
             var messages = new List<string>();
+
+            if (candidate.ApiToken != _config.ApiToken)
+            {
+                _config.ApiToken = candidate.ApiToken;
+                messages.Add(string.IsNullOrEmpty(candidate.ApiToken)
+                    ? "API令牌已清除（/api/* 鉴权关闭）"
+                    : "API令牌已生效（/api/* 需携带 X-Api-Token 或 token 参数）");
+            }
 
             if (candidate.LogLevel != _config.LogLevel)
             {

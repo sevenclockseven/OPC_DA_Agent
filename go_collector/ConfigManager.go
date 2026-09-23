@@ -36,6 +36,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 	if section := cfg.Section("main"); section != nil {
 		config.Title = section.Key("title").String()
 		config.OpcServer = section.Key("opc_server").String()
+		config.WebToken = section.Key("web_token").String()
 	}
 
 	// 解析多个HTTP数据源配置 (http1, http2, ...)
@@ -186,6 +187,10 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 	section := cfg.Section("main")
 	section.NewKey("title", config.Title)
 	section.NewKey("opc_server", config.OpcServer)
+	// web_token 仅非空时写入：清空令牌即不再保留该键，下次加载为空（等效关闭鉴权）
+	if config.WebToken != "" {
+		section.NewKey("web_token", config.WebToken)
+	}
 
 	if config.MqttConfig != nil {
 		section = cfg.Section("mqtt")
@@ -266,6 +271,9 @@ func (cm *ConfigManager) ToIniString(config *AppConfig) string {
 	section := cfg.Section("main")
 	section.NewKey("title", config.Title)
 	section.NewKey("opc_server", config.OpcServer)
+	if config.WebToken != "" {
+		section.NewKey("web_token", config.WebToken)
+	}
 
 	if config.MqttConfig != nil {
 		section = cfg.Section("mqtt")
@@ -273,6 +281,8 @@ func (cm *ConfigManager) ToIniString(config *AppConfig) string {
 		section.NewKey("broker", config.MqttConfig.Broker)
 		section.NewKey("port", fmt.Sprintf("%d", config.MqttConfig.Port))
 		section.NewKey("topic", config.MqttConfig.Topic)
+		section.NewKey("username", config.MqttConfig.Username)
+		section.NewKey("password", config.MqttConfig.Password)
 		section.NewKey("client_id", config.MqttConfig.ClientId)
 		section.NewKey("qos", fmt.Sprintf("%d", config.MqttConfig.Qos))
 		section.NewKey("retain", fmt.Sprintf("%v", config.MqttConfig.Retain))

@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +20,8 @@ type WebServer struct {
 	configManager *ConfigManager
 	transformer   *KeyTransformer
 	collector     *Collector
+	webToken      string
+	webPort       int
 }
 
 func NewWebServer(configPath string, collector *Collector) *WebServer {
@@ -30,7 +35,13 @@ func NewWebServer(configPath string, collector *Collector) *WebServer {
 
 // Start 启动Web服务器
 func (ws *WebServer) Start(port int) error {
+	ws.webPort = port
+	if cfg := ws.configManager.Load(ws.configPath); cfg != nil {
+		ws.webToken = cfg.WebToken
+	}
+
 	r := mux.NewRouter()
+	r.Use(ws.securityMiddleware)
 
 	// 静态文件服务
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./web/static"))))
@@ -1134,8 +1145,135 @@ func (ws *WebServer) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
 	ws.renderHTML(w, tmpl)
 }
 
+// securityMiddleware 请求安全检查，顺序固定：Host（防 DNS rebinding）→ Origin（防浏览器跨站，仅在存在时校验，curl/采集器不带此头不受影响）→ Token（仅 /api/*，web_token 空=不启用；Web 页面壳豁免以便前端弹出令牌引导）。
+// 任一失败时写出 403/401 JSON 并终止请求。
+func (ws *WebServer) securityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if !isAllowedHost(host) {
+			ws.writeJSONStatus(w, http.StatusForbidden, false, "拒绝访问：非法的Host "+host, nil)
+			return
+		}
+
+		origin := r.Header.Get("Origin")
+		if origin != "" && !ws.isAllowedOrigin(origin) {
+			ws.writeJSONStatus(w, http.StatusForbidden, false, "拒绝访问：非法的Origin", nil)
+			return
+		}
+
+		if ws.webToken != "" && strings.HasPrefix(r.URL.Path, "/api/") {
+			provided := r.Header.Get("X-Api-Token")
+			if provided == "" {
+				provided = r.URL.Query().Get("token")
+			}
+			if !secureCompare(ws.webToken, provided) {
+				ws.writeJSONStatus(w, http.StatusUnauthorized, false, "未授权：缺少或错误的访问令牌", nil)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (ws *WebServer) isAllowedOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	if u.Port() != strconv.Itoa(ws.webPort) {
+		return false
+	}
+	return isAllowedHost(u.Hostname())
+}
+
+func isAllowedHost(host string) bool {
+	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	if hn, err := os.Hostname(); err == nil && strings.EqualFold(host, hn) {
+		return true
+	}
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.String() == host {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// secureCompare 固定时间字符串比较，防计时侧信道（长度不等直接失败）
+func secureCompare(expected, actual string) bool {
+	if len(expected) != len(actual) {
+		return false
+	}
+	var diff byte
+	for i := 0; i < len(expected); i++ {
+		diff |= expected[i] ^ actual[i]
+	}
+	return diff == 0
+}
+
+func (ws *WebServer) writeJSONStatus(w http.ResponseWriter, status int, success bool, message string, data interface{}) {
+	response := map[string]interface{}{
+		"success":   success,
+		"message":   message,
+		"data":      data,
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(response)
+}
+
+// authSnippet 统一注入所有 Web 页面（renderHTML 是唯一出口，避免逐页修改内嵌脚本）：
+// 给 fetch 自动附加 X-Api-Token，401 时引导输入令牌并落 localStorage 后刷新。
+const authSnippet = `<script>
+(function(){
+  var prompting = false;
+  function tok(){ try { return localStorage.getItem('opc_collector_token') || ''; } catch(e){ return ''; } }
+  if (window.fetch) {
+    var rawFetch = window.fetch;
+    window.fetch = function(input, init){
+      init = init || {};
+      var headers = {};
+      var h = init.headers;
+      if (h) {
+        if (typeof h.forEach === 'function') { h.forEach(function(v, k){ headers[k] = v; }); }
+        else { for (var k in h) { headers[k] = h[k]; } }
+      }
+      var t = tok();
+      if (t) headers['X-Api-Token'] = t;
+      init.headers = headers;
+      return rawFetch(input, init).then(function(resp){
+        if (resp.status === 401 && !prompting) {
+          prompting = true;
+          var v = prompt('请输入 API 访问令牌 (web_token):');
+          prompting = false;
+          if (v !== null && v.trim() !== '') {
+            try { localStorage.setItem('opc_collector_token', v.trim()); } catch(e){}
+            location.reload();
+          }
+        }
+        return resp;
+      });
+    };
+  }
+})();
+</script>
+`
+
 func (ws *WebServer) renderHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	html = strings.Replace(html, "</head>", authSnippet+"</head>", 1)
 	io.WriteString(w, html)
 }
 
@@ -1182,6 +1320,7 @@ func (ws *WebServer) handleUpdateConfig(w http.ResponseWriter, r *http.Request) 
 	if ws.collector != nil {
 		ws.collector.Reload(config)
 	}
+	ws.webToken = config.WebToken
 
 	ws.writeJSON(w, true, "配置已更新", nil)
 }
@@ -1448,6 +1587,13 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		if opcServer, ok := mainData["opc_server"].(string); ok {
 			config.OpcServer = opcServer
 		}
+		if webToken, ok := mainData["web_token"].(string); ok {
+			config.WebToken = webToken
+		}
+	}
+
+	if webToken, ok := updates["web_token"].(string); ok {
+		config.WebToken = webToken
 	}
 
 	if mqttData, ok := updates["mqtt"].(map[string]interface{}); ok {

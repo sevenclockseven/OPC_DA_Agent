@@ -62,6 +62,10 @@ namespace OPC_DA_Agent
         [JsonProperty("http_bind_ip")]
         public string HttpBindIp { get; set; } = "0.0.0.0";
 
+        // API访问令牌：非空时 /api/* 请求必须携带（Header X-Api-Token 或 query token），空=不启用鉴权
+        [JsonProperty("api_token")]
+        public string ApiToken { get; set; }
+
         // 采集配置
         [JsonProperty("update_interval_ms")]
         public int UpdateInterval { get; set; } = 1000;

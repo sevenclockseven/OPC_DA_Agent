@@ -3,6 +3,7 @@ package main
 type AppConfig struct {
 	Title         string           `json:"title" ini:"title"`
 	OpcServer     string           `json:"opc_server" ini:"opc_server"`
+	WebToken      string           `json:"web_token,omitempty" ini:"web_token"`
 	HttpConfigs   []*HttpConfig    `json:"http_configs,omitempty"`
 	MqttConfig    *MqttConfig      `json:"mqtt,omitempty"`
 	RtdbConfig    *RtdbConfig      `json:"rtdb,omitempty"`

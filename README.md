@@ -131,6 +131,7 @@ Web UI: `http://<ip>:9090/`
   "opc_server_host": "192.168.111.21",
   "opc_server_url": "opcda://192.168.111.21/Freelance2000OPCServer.42.1",
   "http_port": 8080,
+  "api_token": "",
   "tags_file": "tags.json",
   "log_file": "logs\\opc_agent.log",
   "log_level": "Info"
@@ -138,6 +139,7 @@ Web UI: `http://<ip>:9090/`
 ```
 
 - 服务器地址用 `opc_server_prog_id` + `opc_server_host`，或等价的 `opc_server_url`（`opcda://host/progid`）。
+- `api_token`：API 访问令牌，空 = 不启用鉴权（默认）。非空时所有 `/api/*` 请求必须携带，见「安全 / API 认证」。
 - `tags_file`：标签持久化文件，默认 `tags.json`（与 config.json 同级，可单独指定路径）。
 
 ### collector.ini（Go 采集器）
@@ -148,6 +150,7 @@ opc_host=172.16.32.98
 opc_server=Freelance2000OPCServer.42.1
 title=采集系统
 debug=False
+web_token=
 
 [mqtt]
 enabled=True
@@ -175,6 +178,35 @@ MQTT 输出格式（`[mqtt]` 段）：
 - `js_transform`（可选）：返回电文的 JS 表达式，可用变量 `point = {key,value,quality,timestamp}`；返回字符串直接作为电文，返回对象则经 JSON 序列化。适用于需要嵌套/条件结构的后端（依赖 `github.com/robertkrimen/otto`，已纳入 go.mod）。
 
 - 数据源 URL 默认 `http://172.16.32.98:8080/api/stream`（SSE）。采集器检测到 URL 含 `/api/stream` 时走 SSE 长轮询 + 指数退避断线重连；否则按原 HTTP 轮询。
+- `web_token`（`[main]` 段，可选）：Web UI / API 访问令牌，空 = 不启用（默认）。清空该键并保存即关闭鉴权。可在 Web UI「设置」中通过 `POST /api/config` 热更新（请求需携带旧令牌）。
+
+## 安全 / API 认证
+
+C# 代理（`config.json` 的 `api_token`）与 Go 采集器（`collector.ini` 的 `[main] web_token`）各有一个静态访问令牌，语义一致：
+
+- **空 = 完全关闭鉴权**（默认，现网零破坏）；非空时**仅 `/api/*` 路径**要求令牌，Web 页面本身豁免（否则前端无从弹出引导）。
+- 携带方式（二选一）：
+  - 请求头 `X-Api-Token: <令牌>`（推荐，浏览器 JS 自动附加）；
+  - 查询参数 `?token=<令牌>`（SSE / `EventSource` 无法设请求头时用，如 Go 数据源 URL：`http://192.168.111.21:8080/api/stream?token=<令牌>`）。
+- 校验为固定时间比较（防计时侧信道）；令牌在日志中一律脱敏为 `token=***`。
+
+```bash
+# Header 方式
+curl -H "X-Api-Token: <令牌>" http://localhost:8080/api/status
+
+# SSE / EventSource 方式
+curl "http://localhost:8080/api/stream?token=<令牌>"
+```
+
+**Web UI**：启用令牌后首次访问 API 会收到 `401`，页面弹窗提示输入令牌，存入浏览器 `localStorage`（key：C# 为 `opc_agent_token`，Go 为 `opc_collector_token`）后自动附加请求头并刷新；改令牌后重新弹窗即可。
+
+**Host / Origin 限制**（两端一致，防 DNS rebinding 与浏览器跨站）：
+
+- 请求 `Host` 必须是 `localhost` / `127.0.0.1` / `::1` / 本机主机名 / 本机网卡 IP，否则 `403`。**请用 `http://localhost:<port>/`、`http://127.0.0.1:<port>/` 或 `http://<本机IP>:<port>/` 访问**（用域名指向本机会被拒）。
+- 浏览器带 `Origin` 头时额外校验：scheme 为 http/https、端口与服务端口一致、host 同上；不满足返回 `403`。curl / 采集器不带 `Origin`，不受影响。
+- 非法令牌 `401`、非法 Host/Origin `403`，均为 JSON 响应 `{"success":false,...}`。
+
+令牌生成示例：`openssl rand -hex 32`（或任意 16+ 位随机字符串）。该值等同口令，不要提交到公开仓库。
 
 ## API 端点
 
@@ -189,6 +221,8 @@ MQTT 输出格式（`[mqtt]` 段）：
 | GET  | `/api/tags` | 获取已选标签 |
 | POST | `/api/tags` | 保存 / 导入标签（写入 tags.json） |
 | GET  | `/api/stream` | SSE 实时推送 |
+
+以上 `/api/*` 在配置 `api_token` 后均需携带令牌（见「安全 / API 认证」）；`/` 页面豁免。
 
 SSE 帧格式（`text/event-stream`，15s 心跳 `: ping`）：
 
@@ -210,6 +244,8 @@ data: {"ts":"2026-...","values":[{"key":"<nodeId>","value":...,"quality":"Good",
 | POST | `/api/mqtt/test` | 测试 MQTT 连接 |
 | GET  | `/api/status` | 运行状态 |
 | GET  | `/api/data` | 最近一次采集数据 |
+
+以上 `/api/*` 在配置 `web_token` 后均需携带令牌（见「安全 / API 认证」）；`/` 页面豁免。
 
 ## 编译 / CI
 
