@@ -1559,7 +1559,12 @@ func (ws *WebServer) handleUpdateTransformRules(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	ws.writeJSON(w, true, "规则已保存到 transform.json", nil)
+	if err := ws.transformer.LoadFromFile(fileName); err != nil {
+		ws.writeJSON(w, false, "规则已保存但调试面板同步加载失败: "+err.Error(), nil)
+		return
+	}
+
+	ws.writeJSON(w, true, "规则已保存到 "+fileName, nil)
 }
 
 func (ws *WebServer) handleTransformDebug(w http.ResponseWriter, r *http.Request) {

@@ -148,6 +148,7 @@ type TaskRunner struct {
 	task        *TaskConfig
 	transformer *KeyTransformer
 	config      *AppConfig
+	ruleErr     string // 上次规则文件加载错误；同一错误只告警一次，加载成功复位
 }
 
 func NewCollector(config *AppConfig) *Collector {
@@ -212,7 +213,9 @@ func (c *Collector) Start() error {
 			if task.HttpSource != "" {
 				transformFile = "transform_" + task.HttpSource + ".json"
 			}
-			runner.transformer.LoadFromFile(transformFile)
+			if err := runner.transformer.LoadFromFile(transformFile); err != nil && !os.IsNotExist(err) {
+				log.Printf("加载规则文件 %s 失败: %v（按无规则运行）", transformFile, err)
+			}
 			go runner.run(ctx, c)
 		}
 	}
@@ -412,7 +415,15 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 	if tr.task.HttpSource != "" {
 		transformFile = "transform_" + tr.task.HttpSource + ".json"
 	}
-	tr.transformer.LoadFromFile(transformFile)
+	if err := tr.transformer.LoadFromFile(transformFile); err != nil {
+		// ENOENT = 规则文件可选（未配置即无规则），不算错误；其余错误同一条只报一次防刷屏
+		if !os.IsNotExist(err) && err.Error() != tr.ruleErr {
+			tr.ruleErr = err.Error()
+			log.Printf("加载规则文件 %s 失败: %v（按无规则运行）", transformFile, err)
+		}
+	} else {
+		tr.ruleErr = ""
+	}
 
 	var rawData []map[string]interface{}
 	httpClients, _, _ := collector.snapshot()
