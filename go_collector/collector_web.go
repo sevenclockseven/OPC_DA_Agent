@@ -72,7 +72,16 @@ func (ws *WebServer) Start(port int) error {
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Web服务器启动在 http://localhost%s\n", addr)
-	return http.ListenAndServe(addr, r)
+	// 显式超时：ReadHeaderTimeout 防 Slowloris 慢头攻击，Read/Write/Idle 限制僵尸连接占坑
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
 
 // 页面处理函数
@@ -1443,6 +1452,7 @@ func (ws *WebServer) handleRtdbTest(w http.ResponseWriter, r *http.Request) {
 		ws.writeJSON(w, false, fmt.Sprintf("RTDB初始化失败: %v", err), nil)
 		return
 	}
+	defer client.Disconnect()
 
 	if err := client.Send(testMessage, "测试"); err != nil {
 		ws.writeJSON(w, false, fmt.Sprintf("RTDB发送失败: %v", err), nil)

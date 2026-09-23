@@ -534,10 +534,13 @@ func (c *RtdbClient) Connect() error {
 	return nil
 }
 
+// Disconnect 幂等：未连接/重复调用直接返回，防止 defer 与 Stop 双关时误报日志。
 func (c *RtdbClient) Disconnect() {
-	if c.conn != nil {
-		c.conn.Close()
+	if c.conn == nil {
+		return
 	}
+	c.conn.Close()
+	c.conn = nil
 	c.connected = false
 	log.Println("📴 RTDB已断开")
 }
