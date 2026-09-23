@@ -233,8 +233,11 @@ namespace OPC_DA_Agent
                 {
                     if (tag.Enabled || tag.Active)
                     {
-                        opcItemIDs.Add(tag.NodeId);
+                        // 订阅用服务器权威 ItemID；旧数据无 item_id 时回退浏览路径（兼容存量 tags.json）
+                        string subscribeId = string.IsNullOrEmpty(tag.ItemId) ? tag.NodeId : tag.ItemId;
+                        opcItemIDs.Add(subscribeId);
                         clientHandles.Add(opcItemIDs.Count - 1);  // 句柄 = 1-based 项索引
+                        // 数据面 key（SSE/_lastValues/_clientHandleNodes）保持 NodeId 不变，下游转换规则零破坏
                         nodeByHandle.Add(tag.NodeId);
                     }
                 }
@@ -270,7 +273,31 @@ namespace OPC_DA_Agent
                     _opcItems.AddItems(opcItemIDs.Count - 1, ref itemsArray, ref handlesArray,
                         out serverHandles, out errors, null, null);
                     _serverHandles = serverHandles;
-                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签，初值由订阅推送补齐", opcItemIDs.Count - 1, _tags.Count));
+
+                    // 逐项检查 AddItems 错误码（与句柄数组同为 1-based 对齐，索引 0 为占位）：
+                    // ItemID 不被服务器接受时此前是静默失败，用户无法从日志判断标签是否真正订阅成功
+                    int failCount = 0;
+                    if (errors != null)
+                    {
+                        for (int i = 1; i < errors.Length && i < opcItemIDs.Count; i++)
+                        {
+                            int err;
+                            try { err = Convert.ToInt32(errors.GetValue(i)); }
+                            catch (Exception ex)
+                            {
+                                _logger.Warn(string.Format("解析标签添加错误码失败 [{0}]: {1}", opcItemIDs[i], ex.Message));
+                                continue;
+                            }
+                            if (err != 0)
+                            {
+                                failCount++;
+                                _logger.Warn(string.Format("OPC标签添加失败 key=[{0}] ItemID={1} 错误=0x{2:X8}",
+                                    i < nodeByHandle.Count ? nodeByHandle[i] : "?", opcItemIDs[i], err));
+                            }
+                        }
+                    }
+                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签（失败 {2}），初值由订阅推送补齐",
+                        opcItemIDs.Count - 1 - failCount, _tags.Count, failCount));
                 }
             }
             catch (Exception ex)

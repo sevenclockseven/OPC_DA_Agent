@@ -12,6 +12,10 @@ namespace OPC_DA_Agent
         [JsonProperty("node_id")]
         public string NodeId { get; set; }
 
+        // 服务器权威 ItemID（OPCBrowser.GetItemID 结果）；订阅优先用它，浏览路径 node_id 仅作导航/数据面 key
+        [JsonProperty("item_id")]
+        public string ItemId { get; set; }
+
         [JsonProperty("name")]
         public string Name { get; set; }
 

@@ -61,6 +61,9 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
   var base = window.location.origin;
   var nodeCounter = 0;
 
+  // selected 键优先用服务器权威 item_id；旧数据只有 node_id 时回退，保证同一标签不会因键不同而重复/误删
+  function tagKey(t) { return t.item_id || t.node_id || t.name; }
+
   function getToken() {
     try { return localStorage.getItem('opc_agent_token') || ''; } catch(e) { return ''; }
   }
@@ -149,9 +152,10 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
         div.appendChild(childrenDiv);
       } else {
         (function(node) {
+          nodeDiv.dataset.key = node.item_id || node.node_id;
+          nodeDiv.dataset.nodeId = node.node_id;
           nodeDiv.onclick = function() {
             toggleTag(node);
-            nodeDiv.classList.toggle('selected');
           };
         })(n);
         div.appendChild(nodeDiv);
@@ -160,6 +164,8 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
       parent.appendChild(div);
     });
     renderPager(parentId, result, nodeId);
+    // DOM 重建（换页/展开）后回填选中态，新节点不能丢失已有高亮
+    syncTreeHighlight();
   }
 
   function renderPager(parentId, result, nodeId) {
@@ -209,9 +215,14 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
   }
 
   function toggleTag(node) {
-    if (selected[node.node_id]) { delete selected[node.node_id]; }
-    else {
-      selected[node.node_id] = { node_id: node.node_id, name: node.name, description: '', data_type: '', enabled: true, active: true };
+    var key = tagKey(node);
+    if (selected[key]) {
+      delete selected[key];
+    } else if (key !== node.node_id && selected[node.node_id]) {
+      // 列表中是旧 node_id 键的同一条目：点树应删除而非再新增一条
+      delete selected[node.node_id];
+    } else {
+      selected[key] = { node_id: node.node_id, item_id: node.item_id || '', name: node.name, description: '', data_type: '', enabled: true, active: true };
     }
     renderTagList();
   }
@@ -220,7 +231,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     var ul = document.getElementById('tagList');
     ul.innerHTML = '';
     var keys = Object.keys(selected);
-    if (keys.length === 0) { ul.innerHTML = '<p style="color:#6c7086">未选择任何标签</p>'; return; }
+    if (keys.length === 0) { ul.innerHTML = '<p style="color:#6c7086">未选择任何标签</p>'; syncTreeHighlight(); return; }
     keys.forEach(function(id) {
       var t = selected[id];
       var li = document.createElement('li');
@@ -230,11 +241,22 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
       removeSpan.textContent = 'x';
       removeSpan.onclick = (function(id1) { return function() { removeTag(id1); }; })(id);
       var nameSpan = document.createElement('span');
-      nameSpan.textContent = t.name;
+      nameSpan.textContent = tagKey(t);
       li.appendChild(nameSpan);
       li.appendChild(removeSpan);
       ul.appendChild(li);
     });
+    syncTreeHighlight();
+  }
+
+  // 列表与树是两套状态：加载/增删后统一按 selected 重扫已渲染叶子回填高亮，避免"列表有、树不亮"或反之
+  function syncTreeHighlight() {
+    var leaves = document.querySelectorAll('#tree .node.leaf');
+    for (var i = 0; i < leaves.length; i++) {
+      var el = leaves[i];
+      var on = !!(selected[el.dataset.key] || (el.dataset.nodeId && selected[el.dataset.nodeId]));
+      el.classList.toggle('selected', on);
+    }
   }
 
   function removeTag(id) { delete selected[id]; renderTagList(); }
@@ -244,7 +266,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     var val = (inp.value || '').trim();
     if (!val) { alert('请输入 OPC 点号（ItemID）'); return; }
     if (!selected[val]) {
-      selected[val] = { node_id: val, name: val, description: '', data_type: '', enabled: true, active: true };
+      selected[val] = { node_id: val, item_id: val, name: val, description: '', data_type: '', enabled: true, active: true };
       renderTagList();
     }
     inp.value = '';
@@ -254,7 +276,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
     api('/api/tags', 'GET', null, function(r) {
       if (r.success && r.data) {
         selected = {};
-        (r.data || []).forEach(function(t) { selected[t.node_id] = t; });
+        (r.data || []).forEach(function(t) { selected[tagKey(t)] = t; });
         renderTagList();
       }
     });
@@ -285,7 +307,7 @@ h2{margin-bottom:12px;color:#cba6f7;font-size:18px}
       api('/api/tags', 'POST', { tags: tags }, function(r) {
         if (r.success) {
           selected = {};
-          tags.forEach(function(t) { selected[t.node_id] = t; });
+          tags.forEach(function(t) { selected[tagKey(t)] = t; });
           renderTagList();
           alert(r.message || '导入成功');
         } else {
