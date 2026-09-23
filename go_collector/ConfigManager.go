@@ -66,6 +66,10 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 	if section := cfg.Section("main"); section != nil {
 		config.Title = section.Key("title").String()
 		config.OpcServer = section.Key("opc_server").String()
+		if config.OpcServer == "" {
+			// 兼容旧文档/存量配置的 opc_host 键（等价元数据）
+			config.OpcServer = section.Key("opc_host").String()
+		}
 		config.WebToken = section.Key("web_token").String()
 	}
 

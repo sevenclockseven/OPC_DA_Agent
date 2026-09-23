@@ -146,10 +146,8 @@ Web UI: `http://<ip>:9090/`
 
 ```ini
 [main]
-opc_host=172.16.32.98
-opc_server=Freelance2000OPCServer.42.1
 title=采集系统
-debug=False
+opc_server=Freelance2000OPCServer.42.1
 web_token=
 
 [mqtt]

@@ -128,8 +128,8 @@ Standard library first (alphabetical), then third-party. Blank line between grou
 ```go
 type AppConfig struct {
     Title     string `json:"title" ini:"title"`
-    Debug     bool   `json:"debug" ini:"debug"`
-    OpcHost   string `json:"opc_host" ini:"opc_host"`
+    OpcServer string `json:"opc_server" ini:"opc_server"`
+    WebToken  string `json:"web_token,omitempty" ini:"web_token"`
     MqttConfig *MqttConfig `json:"mqtt,omitempty"`
 }
 ```
@@ -198,9 +198,8 @@ signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 ```ini
 [main]
 title=System Title
-debug=False
-opc_host=172.16.32.98
 opc_server=KEPware.KEPServerEx.V4
+web_token=
 
 [mqtt]
 enabled=True
