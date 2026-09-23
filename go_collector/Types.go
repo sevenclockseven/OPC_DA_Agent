@@ -17,6 +17,8 @@ type HttpConfig struct {
 	Url     string `json:"url" ini:"url"`
 	Method  string `json:"method" ini:"method"`
 	Timeout int    `json:"timeout" ini:"timeout"`
+	// Token 数据源侧 api_token：非空时请求自动附加 X-Api-Token 头（对应目标代理的鉴权）
+	Token string `json:"token,omitempty" ini:"token"`
 }
 
 type MqttConfig struct {

@@ -277,6 +277,7 @@ func (tr *TaskRunner) runSse(ctx context.Context, collector *Collector, client *
 			time.Sleep(backoff)
 			continue
 		}
+		applyApiToken(req, client.config.Token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			log.Printf("SSE 连接失败: %v", err)
@@ -760,6 +761,13 @@ func NewHttpClient(config *HttpConfig) *HttpClient {
 	}
 }
 
+// applyApiToken 目标端启用 api_token 鉴权时附加 X-Api-Token 请求头；token 为空则不加，保持未启用鉴权时的原行为。
+func applyApiToken(req *http.Request, token string) {
+	if token != "" {
+		req.Header.Set("X-Api-Token", token)
+	}
+}
+
 func (c *HttpClient) Send(message map[string]interface{}) {
 	jsonData, err := json.Marshal(message)
 	if err != nil {
@@ -776,13 +784,20 @@ func (c *HttpClient) Send(message map[string]interface{}) {
 		method = "POST"
 	}
 
-	var resp *http.Response
-	if method == "GET" {
-		resp, err = client.Get(c.config.Url)
-	} else {
-		resp, err = client.Post(c.config.Url, "application/json",
-			strings.NewReader(string(jsonData)))
+	var body io.Reader
+	if method != "GET" {
+		body = strings.NewReader(string(jsonData))
 	}
+	req, err := http.NewRequest(method, c.config.Url, body)
+	if err != nil {
+		log.Printf("HTTP请求创建失败: %v", err)
+		return
+	}
+	applyApiToken(req, c.config.Token)
+	if method != "GET" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
 
 	if err != nil {
 		log.Printf("HTTP发送失败: %v", err)
@@ -802,7 +817,12 @@ func (c *Collector) fetchFromHttp(client *HttpClient) ([]map[string]interface{},
 		Timeout: time.Duration(client.config.Timeout) * time.Millisecond,
 	}
 
-	resp, err := httpClient.Get(client.config.Url)
+	req, err := http.NewRequest("GET", client.config.Url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP请求创建失败: %v", err)
+	}
+	applyApiToken(req, client.config.Token)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP请求失败: %v", err)
 	}

@@ -185,9 +185,10 @@ MQTT 输出格式（`[mqtt]` 段）：
 C# 代理（`config.json` 的 `api_token`）与 Go 采集器（`collector.ini` 的 `[main] web_token`）各有一个静态访问令牌，语义一致：
 
 - **空 = 完全关闭鉴权**（默认，现网零破坏）；非空时**仅 `/api/*` 路径**要求令牌，Web 页面本身豁免（否则前端无从弹出引导）。
-- 携带方式（二选一）：
+- 携带方式（三选一）：
   - 请求头 `X-Api-Token: <令牌>`（推荐，浏览器 JS 自动附加）；
-  - 查询参数 `?token=<令牌>`（SSE / `EventSource` 无法设请求头时用，如 Go 数据源 URL：`http://192.168.111.21:8080/api/stream?token=<令牌>`）。
+  - 查询参数 `?token=<令牌>`（SSE / `EventSource` 无法设请求头时用，如 Go 数据源 URL：`http://192.168.111.21:8080/api/stream?token=<令牌>`）；
+  - Go 采集器数据源表单的「访问令牌」字段（Web UI「数据源配置 → 添加/编辑数据源」，或 ini 的 `[httpN] token=`）：采集、SSE 订阅与连接测试会自动以 `X-Api-Token` 请求头发送，无需手拼 URL。
 - 校验为固定时间比较（防计时侧信道）；令牌在日志中一律脱敏为 `token=***`。
 
 ```bash
