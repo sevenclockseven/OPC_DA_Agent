@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"strings"
 
 	"gopkg.in/ini.v1"
@@ -22,8 +23,37 @@ func (cm *ConfigManager) Load(path string) *AppConfig {
 	return cm.LoadJson(path)
 }
 
+// defaultTemplateConfig 首次运行的默认模板：输出与任务全部禁用，启动即就绪且零网络行为，由 Web UI 配置后再启用。
+func defaultTemplateConfig() *AppConfig {
+	return &AppConfig{
+		Title:     "OPC DA 采集系统",
+		OpcServer: "",
+		HttpConfigs: []*HttpConfig{
+			{Name: "数据源1", Enabled: false, Url: "http://127.0.0.1:8080/api/stream", Method: "GET", Timeout: 5000},
+		},
+		MqttConfig: &MqttConfig{
+			Enabled: false, Broker: "127.0.0.1", Port: 1883,
+			Topic: "opc/data", ClientId: "opc_collector_01", Qos: 1,
+		},
+		Tasks: []*TaskConfig{
+			{Enabled: false, JobIntervalSecond: 1},
+		},
+	}
+}
+
 func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 	fmt.Printf("[ConfigManager] 正在加载配置文件: %s\n", path)
+	if _, statErr := os.Stat(path); statErr != nil {
+		if !os.IsNotExist(statErr) {
+			fmt.Printf("[ConfigManager] 无法访问配置文件: %v\n", statErr)
+			return nil
+		}
+		fmt.Printf("[ConfigManager] 配置文件不存在，正在创建默认模板: %s\n", path)
+		if saveErr := cm.Save(path, defaultTemplateConfig()); saveErr != nil {
+			fmt.Printf("[ConfigManager] 创建默认模板失败: %v\n", saveErr)
+			return nil
+		}
+	}
 	cfg, err := ini.Load(path)
 	if err != nil {
 		fmt.Printf("[ConfigManager] 加载失败: %v\n", err)
