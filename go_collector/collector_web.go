@@ -56,6 +56,7 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/web/rtdb", ws.handleRtdbPage).Methods("GET")
 	r.HandleFunc("/web/transform", ws.handleTransformPage).Methods("GET")
 	r.HandleFunc("/web/tasks", ws.handleTasksPage).Methods("GET")
+	r.HandleFunc("/web/logs", ws.handleLogsPage).Methods("GET")
 
 	// API接口
 	r.HandleFunc("/api/config", ws.handleGetConfig).Methods("GET")
@@ -69,6 +70,8 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/api/transform/rules", ws.handleUpdateTransformRules).Methods("POST")
 	r.HandleFunc("/api/transform/debug", ws.handleTransformDebug).Methods("GET")
 	r.HandleFunc("/api/webhook/test", ws.handleWebhookTest).Methods("POST")
+	r.HandleFunc("/api/tasks/stats", ws.handleTaskStats).Methods("GET")
+	r.HandleFunc("/api/logs", ws.handleLogs).Methods("GET")
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Web服务器启动在 http://localhost%s\n", addr)
@@ -85,6 +88,150 @@ func (ws *WebServer) Start(port int) error {
 }
 
 // 页面处理函数
+
+func (ws *WebServer) handleTaskStats(w http.ResponseWriter, r *http.Request) {
+	runners := ws.collector.SnapshotRunners()
+	stats := make([]TaskStatSnapshot, 0, len(runners))
+	for _, tr := range runners {
+		stats = append(stats, tr.Stats())
+	}
+	ws.writeJSON(w, true, "ok", stats)
+}
+
+func (ws *WebServer) handleLogs(w http.ResponseWriter, r *http.Request) {
+	after, _ := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	entries, next := globalLogRing.since(after, limit)
+	ws.writeJSON(w, true, "ok", map[string]interface{}{
+		"lines": entries,
+		"next":  next,
+	})
+}
+
+func (ws *WebServer) handleLogsPage(w http.ResponseWriter, r *http.Request) {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>运行日志 - OPC DA Collector</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        .log-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+        .log-toolbar input[type="text"] { flex: 1; min-width: 180px; max-width: 320px; }
+        .log-view { background: #0b1220; color: #cbd5e1; font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.55; border-radius: var(--radius-sm); padding: 14px 16px; height: 62vh; overflow-y: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid #1e293b; }
+        .log-line { padding: 1px 0; }
+        .log-line.warn { color: #fbbf24; }
+        .log-line.err { color: #f87171; }
+        .log-line.ok { color: #4ade80; }
+        .log-line.dim { color: #64748b; }
+        .log-meta { color: var(--text-2); font-size: 13px; }
+        .btn-plain { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: var(--radius-sm); padding: 7px 14px; font-size: 13px; cursor: pointer; }
+        .btn-plain:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-plain.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link active" href="/web/logs">日志</a>
+    </div></div>
+    <div class="container">
+        <h1>运行日志</h1>
+        <p class="page-desc">采集器进程日志（内存环形缓冲最近 1000 条，重启后清空）</p>
+        <div class="log-toolbar">
+            <input type="text" id="logFilter" placeholder="过滤关键字…">
+            <button class="btn-plain" id="btnPause" onclick="togglePause()">暂停滚动</button>
+            <button class="btn-plain" id="btnClear" onclick="clearView()">清空视图</button>
+            <button class="btn-plain active" id="btnFollow" onclick="toggleFollow()">自动跟随</button>
+            <span class="log-meta" id="logCount"></span>
+        </div>
+        <div class="log-view" id="logView"></div>
+    </div>
+    <script>
+        let lastSeq = 0;
+        let paused = false;
+        let follow = true;
+        let allLines = [];
+        let timer = null;
+
+        function classify(t) {
+            if (/error|失败|错误|fatal|panic|⚠️|未读到/i.test(t)) return 'err';
+            if (/warn|警告/i.test(t)) return 'warn';
+            if (/✅|成功|已连接/i.test(t)) return 'ok';
+            return '';
+        }
+
+        function render() {
+            const view = document.getElementById('logView');
+            const q = document.getElementById('logFilter').value.trim().toLowerCase();
+            const frag = document.createDocumentFragment();
+            let shown = 0;
+            for (let i = allLines.length - 1; i >= 0; i--) {
+                const line = allLines[i];
+                if (q && line.text.toLowerCase().indexOf(q) === -1) continue;
+                const div = document.createElement('div');
+                div.className = 'log-line ' + classify(line.text);
+                div.textContent = line.text;
+                frag.appendChild(div);
+                shown++;
+                if (shown >= 500) break;
+            }
+            view.innerHTML = '';
+            view.appendChild(frag);
+            document.getElementById('logCount').textContent = '缓冲 ' + allLines.length + ' 条 · 显示 ' + shown + ' 条';
+            if (follow && !paused) view.scrollTop = 0;
+        }
+
+        async function poll() {
+            if (paused) return;
+            try {
+                const resp = await fetch('/api/logs?after=' + lastSeq + '&limit=200');
+                const data = await resp.json();
+                if (!data.success) return;
+                const lines = data.data.lines || [];
+                if (lines.length) {
+                    allLines = allLines.concat(lines);
+                    if (allLines.length > 1000) allLines = allLines.slice(-1000);
+                    lastSeq = data.data.next || lastSeq;
+                    render();
+                }
+            } catch (e) { /* 网络抖动下轮询继续 */ }
+        }
+
+        function togglePause() {
+            paused = !paused;
+            const b = document.getElementById('btnPause');
+            b.textContent = paused ? '继续滚动' : '暂停滚动';
+            b.classList.toggle('active', paused);
+        }
+
+        function toggleFollow() {
+            follow = !follow;
+            document.getElementById('btnFollow').classList.toggle('active', follow);
+        }
+
+        function clearView() {
+            allLines = [];
+            render();
+        }
+
+        document.getElementById('logFilter').addEventListener('input', render);
+        poll();
+        timer = setInterval(poll, 2000);
+    </script>
+</body>
+</html>
+`
+	ws.renderHTML(w, tmpl)
+}
 
 func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
@@ -115,6 +262,7 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
         <a class="nav-link" href="/web/rtdb">RTDB</a>
         <a class="nav-link" href="/web/transform">转换</a>
         <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container">
         <h1>Web 配置界面</h1>
@@ -144,6 +292,10 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
             <a href="/web/monitor" class="menu-item">
                 <h3>监控配置</h3>
                 <p>配置 Webhook 预警</p>
+            </a>
+            <a href="/web/logs" class="menu-item">
+                <h3>运行日志</h3>
+                <p>查看采集器实时运行日志</p>
             </a>
         </div>
 
@@ -185,6 +337,7 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
         <a class="nav-link" href="/web/rtdb">RTDB</a>
         <a class="nav-link" href="/web/transform">转换</a>
         <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container">
         <h1>数据源配置</h1>
@@ -415,6 +568,7 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
         <a class="nav-link active" href="/web/rtdb">RTDB</a>
         <a class="nav-link" href="/web/transform">转换</a>
         <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container narrow">
         <h1>RTDB 输出配置</h1>
@@ -569,6 +723,7 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
         <a class="nav-link" href="/web/rtdb">RTDB</a>
         <a class="nav-link" href="/web/transform">转换</a>
         <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container narrow">
         <h1>MQTT 配置</h1>
@@ -765,6 +920,7 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
         <a class="nav-link" href="/web/rtdb">RTDB</a>
         <a class="nav-link active" href="/web/transform">转换</a>
         <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container">
         <h1>键名转换规则</h1>
@@ -1056,6 +1212,7 @@ func (ws *WebServer) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
         <a class="nav-link" href="/web/rtdb">RTDB</a>
         <a class="nav-link" href="/web/transform">转换</a>
         <a class="nav-link active" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container narrow">
         <h1>监控配置</h1>
@@ -1998,6 +2155,7 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
         <a class="nav-link" href="/web/rtdb">RTDB</a>
         <a class="nav-link" href="/web/transform">转换</a>
         <a class="nav-link" href="/web/monitor">监控</a>
+        <a class="nav-link" href="/web/logs">日志</a>
     </div></div>
     <div class="container">
         <h1>采集任务配置</h1>
@@ -2038,6 +2196,7 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
         let tasks = [];
         let httpConfigs = [];
         let editingTask = '';
+        let taskStats = {};
 
         async function loadData() {
             try {
@@ -2047,10 +2206,23 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
                     tasks = data.data.tasks || [];
                     httpConfigs = data.data.http_configs || [];
                     renderTasks();
+                    loadStats();
                 }
             } catch (e) {
                 showResult(false, '加载配置失败: ' + e.message);
             }
+        }
+
+        async function loadStats() {
+            try {
+                const resp = await fetch('/api/tasks/stats');
+                const data = await resp.json();
+                if (data.success) {
+                    taskStats = {};
+                    (data.data || []).forEach(s => { taskStats[s.label] = s; });
+                    renderTasks();
+                }
+            } catch (e) { /* 统计接口失败不打断配置页 */ }
         }
 
         function renderTasks() {
@@ -2065,6 +2237,24 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
                 const enabled = task.enabled;
                 const source = task.http_source || '数据源1';
                 const interval = task.job_interval_second || 1;
+                const st = taskStats['task' + (index + 1)];
+                let tagLine;
+                if (!enabled) {
+                    tagLine = '标签: —（任务停用）';
+                } else if (!st || !st.has_window) {
+                    tagLine = '标签: 等待首个10s统计窗口…';
+                } else if (st.expected === 0) {
+                    tagLine = '标签: 实采 ' + st.hit + '（期望集未获取）';
+                } else if (st.warming) {
+                    tagLine = '标签: 实采 ' + st.hit + '/' + st.expected + ' · 预热中';
+                } else if (st.missing > 0) {
+                    tagLine = '标签: 实采 ' + st.hit + '/' + st.expected + ' · 缺失 ' + st.missing;
+                } else {
+                    tagLine = '标签: 实采 ' + st.hit + '/' + st.expected;
+                }
+                if (st && st.expected_err) {
+                    tagLine += ' · 期望集拉取失败';
+                }
                 const card = document.createElement('div');
                 card.className = 'task-card' + (enabled ? '' : ' disabled');
                 card.innerHTML =
@@ -2072,7 +2262,7 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
                     '<div class="task-info">' +
                     '数据源: ' + source + '<br>' +
                     '采集间隔: ' + interval + '秒<br>' +
-                    '标签数: ' + (task.tags ? task.tags.length : 0) + '<br>' +
+                    tagLine +
                     '</div>' +
                     '<div class="task-actions">' +
                     '<button class="btn btn-edit" onclick="editTask(' + index + ')">编辑</button>' +
@@ -2189,6 +2379,7 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
         }
 
         loadData();
+        setInterval(loadStats, 5000);
     </script>
 </body>
 </html>

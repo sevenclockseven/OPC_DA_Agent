@@ -47,9 +47,9 @@ func main() {
 		return
 	}
 
-	// 初始化日志
+	// 初始化日志：stderr 保持原行为，同时进环形缓冲供 Web /api/logs 查看
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.SetOutput(os.Stderr)
+	log.SetOutput(io.MultiWriter(os.Stderr, globalLogRing))
 
 	// 打印启动信息
 	fmt.Println("=== OPC DA Collector ===")
@@ -109,6 +109,73 @@ func getCurrentDir() string {
 	return "未知"
 }
 
+type logRingEntry struct {
+	Seq  uint64 `json:"seq"`
+	Text string `json:"text"`
+}
+
+type logRing struct {
+	mu       sync.Mutex
+	entries  []logRingEntry
+	capacity int
+	nextSeq  uint64
+}
+
+func newLogRing(capacity int) *logRing {
+	return &logRing{capacity: capacity}
+}
+
+func (r *logRing) Write(p []byte) (int, error) {
+	text := strings.TrimRight(string(p), "\n")
+	if text == "" {
+		return len(p), nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, line := range strings.Split(text, "\n") {
+		if line == "" {
+			continue
+		}
+		r.nextSeq++
+		e := logRingEntry{Seq: r.nextSeq, Text: line}
+		if len(r.entries) < r.capacity {
+			r.entries = append(r.entries, e)
+		} else {
+			copy(r.entries, r.entries[1:])
+			r.entries[len(r.entries)-1] = e
+		}
+	}
+	return len(p), nil
+}
+
+// since after=0 取最近 limit 条首屏；否则取 seq>after 的增量（旧→新）
+func (r *logRing) since(after uint64, limit int) ([]logRingEntry, uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 || limit > r.capacity {
+		limit = r.capacity
+	}
+	start := 0
+	if after > 0 {
+		start = sort.Search(len(r.entries), func(i int) bool { return r.entries[i].Seq > after })
+	} else if len(r.entries) > limit {
+		start = len(r.entries) - limit
+	}
+	end := start + limit
+	if end > len(r.entries) {
+		end = len(r.entries)
+	}
+	out := make([]logRingEntry, end-start)
+	copy(out, r.entries[start:end])
+	next := after
+	if len(out) > 0 {
+		next = out[len(out)-1].Seq
+	}
+	return out, next
+}
+
+var globalLogRing = newLogRing(1000)
+
 func showHelpInfo() {
 	fmt.Println("OPC DA Collector - OPC DA数据采集程序")
 	fmt.Println()
@@ -144,6 +211,7 @@ type Collector struct {
 	rtdbClient  *RtdbClient
 	running     bool
 	cancelFunc  context.CancelFunc
+	runners     []*TaskRunner // 当前生效的任务运行器，供 /api/tasks/stats 读取（c.mu 保护）
 }
 
 type TaskRunner struct {
@@ -163,6 +231,59 @@ type TaskRunner struct {
 	windowSeen map[string]struct{}
 	windowStart time.Time
 	statReadyAt time.Time // 期望集就绪预热截止：此前窗口只报读到数、不判定缺失
+
+	// 最近一次 10s 窗口结算快照，供 Web /api/tasks/stats 展示（statMu 保护）
+	statUpdatedAt   time.Time
+	statHit         int
+	statMissing     int
+	statMissingKeys []string
+	statWarming     bool
+}
+
+// TaskStatSnapshot 任务批次质量只读快照（JSON 输出给 Web 任务卡片）
+type TaskStatSnapshot struct {
+	Label       string    `json:"label"`
+	HttpSource  string    `json:"http_source"`
+	Enabled     bool      `json:"enabled"`
+	Expected    int       `json:"expected"`
+	Hit         int       `json:"hit"`
+	Missing     int       `json:"missing"`
+	MissingKeys []string  `json:"missing_keys"`
+	Warming     bool      `json:"warming"`
+	ExpectedErr string    `json:"expected_err"`
+	HasWindow   bool      `json:"has_window"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Stats 返回最近窗口快照；expected 取当前期望集实时长度（30s 内可能已刷新），
+// hit/missing 为上一个已结算 10s 窗口的结果
+func (tr *TaskRunner) Stats() TaskStatSnapshot {
+	tr.statMu.Lock()
+	defer tr.statMu.Unlock()
+	keys := tr.statMissingKeys
+	if keys == nil {
+		keys = []string{}
+	}
+	// 拷贝一份，避免调用方与后续结算并发读写同一底层数组
+	cp := make([]string, len(keys))
+	copy(cp, keys)
+	src := ""
+	if tr.task != nil {
+		src = tr.task.HttpSource
+	}
+	return TaskStatSnapshot{
+		Label:       tr.taskLabel,
+		HttpSource:  src,
+		Enabled:     tr.task != nil && tr.task.Enabled,
+		Expected:    len(tr.expected),
+		Hit:         tr.statHit,
+		Missing:     tr.statMissing,
+		MissingKeys: cp,
+		Warming:     tr.statWarming,
+		ExpectedErr: tr.expectedErr,
+		HasWindow:   !tr.statUpdatedAt.IsZero(),
+		UpdatedAt:   tr.statUpdatedAt,
+	}
 }
 
 func NewCollector(config *AppConfig) *Collector {
@@ -179,12 +300,22 @@ func (c *Collector) snapshot() (httpClients []*HttpClient, mqtt *MqttClient, rtd
 	return c.httpClients, c.mqttClient, c.rtdbClient
 }
 
+// SnapshotRunners 返回当前任务运行器副本切片，供 Web 层读取批次质量统计。
+func (c *Collector) SnapshotRunners() []*TaskRunner {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]*TaskRunner, len(c.runners))
+	copy(out, c.runners)
+	return out
+}
+
 func (c *Collector) Start() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancelFunc = cancel
+	c.runners = c.runners[:0]
 
 	c.httpClients = make([]*HttpClient, 0)
 	for _, httpConfig := range c.config.HttpConfigs {
@@ -224,6 +355,7 @@ func (c *Collector) Start() error {
 				transformer: NewKeyTransformer(),
 				taskLabel:   fmt.Sprintf("task%d", i+1),
 			}
+			c.runners = append(c.runners, runner)
 			transformFile := "transform.json"
 			if task.HttpSource != "" {
 				transformFile = "transform_" + task.HttpSource + ".json"
@@ -247,6 +379,7 @@ func (c *Collector) Stop() {
 	if c.cancelFunc != nil {
 		c.cancelFunc()
 	}
+	c.runners = nil
 
 	if c.mqttClient != nil {
 		c.mqttClient.Disconnect()
@@ -567,14 +700,23 @@ func (tr *TaskRunner) noteBatch(rawData []map[string]interface{}) {
 	label := tr.taskLabel
 	tr.windowSeen = make(map[string]struct{})
 	tr.windowStart = now
+	tr.statUpdatedAt = now
 
 	if len(expected) == 0 {
+		tr.statHit = len(seen)
+		tr.statMissing = 0
+		tr.statMissingKeys = nil
+		tr.statWarming = false
 		log.Printf("📊 批次质量 [%s] 近10s: 读到 %d 个不同key（期望集未获取）", label, len(seen))
 		return
 	}
 	// 预热期内只报读到数不判定缺失：期望集刚刷新（含启动首次）时，
 	// 新增 key 尚未进流（订阅建立/初值/快照各需时间），缺失名单全是误报
 	if now.Before(tr.statReadyAt) {
+		tr.statHit = len(seen)
+		tr.statMissing = 0
+		tr.statMissingKeys = nil
+		tr.statWarming = true
 		log.Printf("📊 批次质量 [%s] 预热中（新期望集 20s 内不判定缺失）: 读到 %d/%d", label, len(seen), len(expected))
 		return
 	}
@@ -588,10 +730,15 @@ func (tr *TaskRunner) noteBatch(rawData []map[string]interface{}) {
 		}
 	}
 	sort.Strings(missing)
+	tr.statHit = hit
+	tr.statMissing = len(missing)
+	tr.statWarming = false
 	if len(missing) == 0 {
+		tr.statMissingKeys = nil
 		log.Printf("📊 批次质量 [%s] 近10s: 读到 %d/%d, 无缺失", label, hit, len(expected))
 		return
 	}
+	tr.statMissingKeys = missing
 	shown := missing
 	extra := ""
 	if len(shown) > 30 {
