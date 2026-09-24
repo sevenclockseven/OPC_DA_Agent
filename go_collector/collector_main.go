@@ -877,13 +877,15 @@ func (c *RtdbClient) formatLine(key string, value interface{}, meta map[string]i
 	}
 
 	quality := 192
-	timestamp := time.Now().UnixMilli()
+	// RTDB 时间戳按秒（epoch 秒，与 jiaohua 参照实现一致）；metadata 内是毫秒，取到后 /1000。
+	// MQTT 侧仍用毫秒，仅此处转换单位。
+	timestamp := time.Now().Unix()
 	if meta != nil {
 		if q, ok := meta["quality"].(int); ok {
 			quality = q
 		}
 		if t, ok := meta["timestamp"].(int64); ok {
-			timestamp = t
+			timestamp = t / 1000
 		}
 	}
 
