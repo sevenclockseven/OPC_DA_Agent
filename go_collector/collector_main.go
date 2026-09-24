@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -150,6 +151,17 @@ type TaskRunner struct {
 	transformer *KeyTransformer
 	config      *AppConfig
 	ruleErr     string // 上次规则文件加载错误；同一错误只告警一次，加载成功复位
+
+	// 批次数据质量统计：期望集 = C# GET /api/tags（enabled||active，key=item_id||node_id||name）；
+	// 10s 窗口并集——SSE 快照(全量)与变化推送(增量) payload 同构无法区分，
+	// 按单批报缺失会对增量批大量误报，窗口并集只反映"近 10s 是否读到过"
+	taskLabel         string
+	statMu            sync.Mutex
+	expected          map[string]struct{}
+	expectedErr       string
+	lastExpectedFetch time.Time
+	windowSeen        map[string]struct{}
+	windowStart       time.Time
 }
 
 func NewCollector(config *AppConfig) *Collector {
@@ -203,12 +215,13 @@ func (c *Collector) Start() error {
 		}
 	}
 
-	for _, task := range c.config.Tasks {
+	for i, task := range c.config.Tasks {
 		if task.Enabled {
 			runner := &TaskRunner{
 				task:        task,
 				config:      c.config,
 				transformer: NewKeyTransformer(),
+				taskLabel:   fmt.Sprintf("task%d", i+1),
 			}
 			transformFile := "transform.json"
 			if task.HttpSource != "" {
@@ -270,6 +283,7 @@ func (tr *TaskRunner) run(ctx context.Context, collector *Collector) {
 		httpClients, _, _ := collector.snapshot()
 		for _, client := range httpClients {
 			if client.config.Name == tr.task.HttpSource && strings.Contains(client.config.Url, "/api/stream") {
+				tr.maybeRefreshExpected(client)
 				tr.runSse(ctx, collector, client)
 				return
 			}
@@ -336,6 +350,7 @@ func (tr *TaskRunner) runSse(ctx context.Context, collector *Collector, client *
 			continue
 		}
 		backoff = time.Second
+		tr.maybeRefreshExpected(client)
 
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024)
@@ -411,6 +426,163 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
+// refreshExpected 拉取 C# 代理 GET /api/tags 刷新期望集合；
+// key 口径 item_id||node_id||name 与 C# 前端 tagKey 一致，仅 enabled||active 计入
+//（与 C# ApplyTags 订阅口径相同），保证"期望=代理页面可见标签"同一事实来源
+func (tr *TaskRunner) refreshExpected(client *HttpClient) error {
+	u, err := url.Parse(client.config.Url)
+	if err != nil {
+		return fmt.Errorf("解析数据源URL失败: %v", err)
+	}
+	u.Path = "/api/tags"
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	httpClient := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("期望集请求创建失败: %v", err)
+	}
+	applyApiToken(req, client.config.Token)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("期望集请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("期望集请求状态码 %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("期望集读取响应失败: %v", err)
+	}
+	var apiResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    []struct {
+			NodeId  string `json:"node_id"`
+			ItemId  string `json:"item_id"`
+			Name    string `json:"name"`
+			Enabled bool   `json:"enabled"`
+			Active  bool   `json:"active"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("期望集解析JSON失败: %v", err)
+	}
+	if !apiResp.Success {
+		return fmt.Errorf("期望集API返回错误: %s", apiResp.Message)
+	}
+
+	next := make(map[string]struct{}, len(apiResp.Data))
+	for _, t := range apiResp.Data {
+		if !t.Enabled && !t.Active {
+			continue
+		}
+		key := t.ItemId
+		if key == "" {
+			key = t.NodeId
+		}
+		if key == "" {
+			key = t.Name
+		}
+		if key == "" {
+			continue
+		}
+		next[key] = struct{}{}
+	}
+	tr.statMu.Lock()
+	tr.expected = next
+	tr.statMu.Unlock()
+	return nil
+}
+
+// maybeRefreshExpected 懒刷新：成功 5 分钟一次，失败 1 分钟后重试；
+// 同一错误只 Warn 一次（复用 ruleErr 的去重模式，防黑洞地址刷屏）
+func (tr *TaskRunner) maybeRefreshExpected(client *HttpClient) {
+	tr.statMu.Lock()
+	if time.Since(tr.lastExpectedFetch) < 5*time.Minute {
+		tr.statMu.Unlock()
+		return
+	}
+	tr.statMu.Unlock()
+
+	if err := tr.refreshExpected(client); err != nil {
+		tr.statMu.Lock()
+		sameErr := err.Error() == tr.expectedErr
+		tr.expectedErr = err.Error()
+		// lastExpectedFetch 回拨 4 分钟 = 失败后 1 分钟重试
+		tr.lastExpectedFetch = time.Now().Add(-4 * time.Minute)
+		tr.statMu.Unlock()
+		if !sameErr {
+			log.Printf("批次质量期望集拉取失败（1分钟后重试）: %v", err)
+		}
+		return
+	}
+
+	tr.statMu.Lock()
+	tr.expectedErr = ""
+	tr.lastExpectedFetch = time.Now()
+	n := len(tr.expected)
+	label := tr.taskLabel
+	tr.statMu.Unlock()
+	log.Printf("批次质量期望集已刷新 [%s]: %d 个标签（C# 代理需 ≥ 本批次版本以对齐 key 口径）", label, n)
+}
+
+// noteBatch 把本批 key 并入 10s 统计窗口，窗口到期输出一条汇总并重置。
+// 挂在 processAndPublish 入口：SSE 与轮询两条采集路径的共同汇聚点
+func (tr *TaskRunner) noteBatch(rawData []map[string]interface{}) {
+	tr.statMu.Lock()
+	defer tr.statMu.Unlock()
+
+	now := time.Now()
+	if tr.windowStart.IsZero() {
+		tr.windowStart = now
+		tr.windowSeen = make(map[string]struct{})
+	}
+	for _, item := range rawData {
+		if k, ok := item["topic"].(string); ok && k != "" {
+			tr.windowSeen[k] = struct{}{}
+		}
+	}
+	if now.Sub(tr.windowStart) < 10*time.Second {
+		return
+	}
+
+	seen := tr.windowSeen
+	expected := tr.expected
+	label := tr.taskLabel
+	tr.windowSeen = make(map[string]struct{})
+	tr.windowStart = now
+
+	if len(expected) == 0 {
+		log.Printf("📊 批次质量 [%s] 近10s: 读到 %d 个不同key（期望集未获取）", label, len(seen))
+		return
+	}
+	var missing []string
+	hit := 0
+	for k := range expected {
+		if _, ok := seen[k]; ok {
+			hit++
+		} else {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) == 0 {
+		log.Printf("📊 批次质量 [%s] 近10s: 读到 %d/%d, 无缺失", label, hit, len(expected))
+		return
+	}
+	shown := missing
+	extra := ""
+	if len(shown) > 30 {
+		shown = shown[:30]
+		extra = fmt.Sprintf(" ...共%d个", len(missing))
+	}
+	log.Printf("📊 批次质量 [%s] 近10s: 读到 %d/%d, 未读到 %d: [%s]%s",
+		label, hit, len(expected), len(missing), strings.Join(shown, ", "), extra)
+}
+
 func (tr *TaskRunner) collectData(collector *Collector) {
 	transformFile := "transform.json"
 	if tr.task.HttpSource != "" {
@@ -428,6 +600,19 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 
 	var rawData []map[string]interface{}
 	httpClients, _, _ := collector.snapshot()
+
+	// 期望集懒刷新（成功 5 分钟/失败 1 分钟周期），与数据拉取解耦：
+	// 拉取失败不影响采集，仅统计日志分母缺失
+	if tr.task.HttpSource != "" {
+		for _, client := range httpClients {
+			if client.config.Name == tr.task.HttpSource {
+				tr.maybeRefreshExpected(client)
+				break
+			}
+		}
+	} else if len(httpClients) > 0 {
+		tr.maybeRefreshExpected(httpClients[0])
+	}
 
 	if tr.task.HttpSource != "" {
 		for _, client := range httpClients {
@@ -460,6 +645,8 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 }
 
 func (tr *TaskRunner) processAndPublish(collector *Collector, rawData []map[string]interface{}) {
+	tr.noteBatch(rawData)
+
 	values := make(map[string]interface{})
 	metadata := make(map[string]map[string]interface{})
 
