@@ -93,54 +93,64 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>OPC DA Collector - Web配置</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; border-bottom: 3px solid #4CAF50; padding-bottom: 10px; }
-        .menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 30px; }
-        .menu-item { background: #4CAF50; color: white; padding: 20px; border-radius: 6px; text-decoration: none; text-align: center; transition: all 0.3s; }
-        .menu-item:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
-        .menu-item h3 { margin: 0 0 10px 0; font-size: 18px; }
-        .menu-item p { margin: 0; font-size: 14px; opacity: 0.9; }
-        .info { background: #e3f2fd; padding: 15px; border-radius: 6px; margin-top: 20px; border-left: 4px solid #2196F3; }
+        .menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 24px; }
+        .menu-item { background: var(--surface); color: var(--text); padding: 22px 20px; border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; transition: border-color .15s, box-shadow .15s, transform .15s; }
+        .menu-item:hover { border-color: var(--primary); box-shadow: var(--shadow); transform: translateY(-2px); }
+        .menu-item h3 { margin: 0 0 8px; font-size: 16px; border: none; padding: 0; color: var(--text); }
+        .menu-item p { margin: 0; font-size: 13px; color: var(--text-2); }
+        .info { background: #eff6ff; padding: 16px 18px; border-radius: var(--radius); margin-top: 26px; border-left: 4px solid var(--primary); font-size: 14px; }
+        .info ol { margin: 8px 0 0; padding-left: 20px; color: var(--text-2); }
+        .welcome { color: var(--text-2); font-size: 14px; margin: 0 0 4px; }
     </style>
 </head>
 <body>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link active" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+    </div></div>
     <div class="container">
-        <h1>🔧 OPC DA Collector Web配置界面</h1>
-        <p>欢迎使用OPC DA采集程序Web配置界面</p>
+        <h1>Web 配置界面</h1>
+        <p class="welcome">OPC DA 采集程序 · 配置与输出管理</p>
 
         <div class="menu">
             <a href="/web/http" class="menu-item">
-                <h3>🌐 数据源</h3>
-                <p>配置HTTP数据源</p>
+                <h3>数据源</h3>
+                <p>配置 HTTP 数据源（C# 代理地址）</p>
             </a>
             <a href="/web/tasks" class="menu-item">
-                <h3>📋 采集任务</h3>
-                <p>配置采集任务</p>
+                <h3>采集任务</h3>
+                <p>绑定数据源与采集间隔</p>
             </a>
             <a href="/web/mqtt" class="menu-item">
-                <h3>📡 MQTT输出</h3>
-                <p>配置MQTT发布</p>
+                <h3>MQTT 输出</h3>
+                <p>配置 MQTT 发布与格式</p>
             </a>
             <a href="/web/rtdb" class="menu-item">
-                <h3>💾 RTDB输出</h3>
-                <p>配置实时库输出</p>
+                <h3>RTDB 输出</h3>
+                <p>配置实时库输出与调试日志</p>
             </a>
             <a href="/web/transform" class="menu-item">
-                <h3>🔄 键名转换</h3>
-                <p>配置转换规则</p>
+                <h3>键名转换</h3>
+                <p>配置键名转换规则</p>
             </a>
             <a href="/web/monitor" class="menu-item">
-                <h3>🔔 监控配置</h3>
-                <p>配置Webhook预警</p>
+                <h3>监控配置</h3>
+                <p>配置 Webhook 预警</p>
             </a>
         </div>
 
         <div class="info">
-            <strong>快速开始:</strong>
+            <strong>快速开始</strong>
             <ol>
-                <li>配置MQTT或HTTP服务器</li>
+                <li>配置 MQTT 或 RTDB 输出</li>
                 <li>设置键名转换规则</li>
                 <li>导入或创建配置文件</li>
                 <li>启动采集程序</li>
@@ -160,40 +170,25 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>数据源配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .http-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px; margin-top: 20px; }
-        .http-card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 15px; }
-        .http-card.disabled { opacity: 0.6; }
-        .http-name { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px; }
-        .http-info { color: #666; font-size: 14px; line-height: 1.6; }
-        .http-actions { margin-top: 10px; display: flex; gap: 8px; }
-        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
-        .btn-primary { background: #4CAF50; color: white; }
-        .btn-danger { background: #f44336; color: white; }
-        .btn-edit { background: #2196F3; color: white; }
-        .btn:hover { opacity: 0.85; }
-        .add-http { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-top: 15px; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
-        .modal-content { background: white; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: white; }
-        .badge-on { background: #4CAF50; }
-        .badge-off { background: #999; }
+        .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link active" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+    </div></div>
     <div class="container">
-        <a href="/" class="back">← 返回首页</a>
-        <h1>🌐 数据源配置</h1>
-        <p>配置HTTP数据源（C# OPC DA Agent地址）</p>
+        <h1>数据源配置</h1>
+        <p class="page-desc">配置 HTTP 数据源（C# OPC DA Agent 地址）</p>
         <div id="result"></div>
 
         <div class="http-grid" id="httpGrid"></div>
@@ -234,7 +229,7 @@ func (ws *WebServer) handleHttpPage(w http.ResponseWriter, r *http.Request) {
                     <input type="number" id="httpTimeout" value="5000" min="1000">
                 </div>
                 <div class="modal-actions">
-                    <button class="btn" onclick="closeModal()" style="background:#666;color:white;">取消</button>
+                    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
                     <button class="btn btn-primary" onclick="saveHttp()">保存</button>
                 </div>
             </div>
@@ -407,26 +402,23 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>RTDB配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
-        .back:hover { background: #555; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style></style>
 </head>
 <body>
-    <div class="container">
-        <h1>💾 RTDB输出配置</h1>
-        <a href="/" class="back">← 返回首页</a>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link active" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+    </div></div>
+    <div class="container narrow">
+        <h1>RTDB 输出配置</h1>
+        <p class="page-desc">配置实时库（KairosDB telnet put）输出</p>
 
         <form id="rtdbForm">
             <div class="form-group">
@@ -464,11 +456,11 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
                 </select>
             </div>
 
-            <button type="button" onclick="saveRtdb()">💾 保存配置</button>
-            <button type="button" class="test" onclick="testRtdb()">🧪 测试连接</button>
+            <button type="button" onclick="saveRtdb()">保存配置</button>
+            <button type="button" class="test" onclick="testRtdb()">测试连接</button>
         </form>
 
-        <div id="result" style="margin-top: 20px;"></div>
+        <div id="result"></div>
     </div>
 
     <script>
@@ -564,26 +556,23 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>MQTT配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
-        .back:hover { background: #555; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style></style>
 </head>
 <body>
-    <div class="container">
-        <h1>📡 MQTT配置</h1>
-        <a href="/" class="back">← 返回首页</a>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link active" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+    </div></div>
+    <div class="container narrow">
+        <h1>MQTT 配置</h1>
+        <p class="page-desc">配置 MQTT 发布、报文格式与 JS 转换</p>
 
         <form id="mqttForm">
             <div class="form-group">
@@ -648,11 +637,11 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 <textarea id="js_transform" name="js_transform" rows="3" placeholder="返回电文的JS表达式, 变量 point={key,value,quality,timestamp}"></textarea>
             </div>
 
-            <button type="button" onclick="saveMqtt()">💾 保存配置</button>
-            <button type="button" class="test" onclick="testMqtt()">🧪 测试连接</button>
+            <button type="button" onclick="saveMqtt()">保存配置</button>
+            <button type="button" class="test" onclick="testMqtt()">测试连接</button>
         </form>
 
-        <div id="result" style="margin-top: 20px;"></div>
+        <div id="result"></div>
     </div>
 
     <script>
@@ -763,36 +752,26 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
 <head>
     <title>键名转换规则 - OPC DA Collector</title>
     <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
-        .back:hover { background: #555; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-        .rule-item { background: #f9f9f9; padding: 10px; margin: 10px 0; border-radius: 4px; border-left: 4px solid #4CAF50; cursor: move; }
-        .rule-item.dragging { opacity: 0.5; border-left-color: #2196F3; }
-        .rule-item.drag-over { border-top: 2px solid #2196F3; }
-        .preview { background: #e3f2fd; padding: 15px; border-radius: 6px; margin-top: 20px; }
-        .rule-buttons { display: inline-block; margin-left: 10px; }
-        .rule-buttons button { padding: 4px 8px; margin-right: 5px; font-size: 12px; }
-        .source-selector { background: #fff3e0; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #ff9800; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style></style>
 </head>
 <body>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link active" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+    </div></div>
     <div class="container">
-        <h1>🔄 键名转换规则</h1>
-        <a href="/" class="back">← 返回首页</a>
+        <h1>键名转换规则</h1>
+        <p class="page-desc">按数据源配置键名转换，支持拖拽排序</p>
 
         <div class="source-selector">
-            <div class="form-group">
+            <div class="form-group" style="margin-bottom: 0;">
                 <label>选择数据源</label>
                 <select id="source_selector" onchange="onSourceChange()">
                     <option value="">默认（所有数据源共用）</option>
@@ -841,15 +820,15 @@ func (ws *WebServer) handleTransformPage(w http.ResponseWriter, r *http.Request)
             <input type="text" id="description" placeholder="规则描述">
         </div>
 
-        <button type="button" onclick="addRule()">➕ 添加规则</button>
-        <button type="button" class="test" onclick="previewTransform()">👁️ 预览转换</button>
-        <button type="button" onclick="saveRules()">💾 保存规则</button>
+        <button type="button" onclick="addRule()">添加规则</button>
+        <button type="button" class="test" onclick="previewTransform()">预览转换</button>
+        <button type="button" onclick="saveRules()">保存规则</button>
 
         <h3>当前规则列表</h3>
         <div id="rulesList"></div>
 
         <div id="preview" class="preview" style="display: none;"></div>
-        <div id="result" style="margin-top: 20px;"></div>
+        <div id="result"></div>
     </div>
 
     <script>
@@ -1064,26 +1043,23 @@ func (ws *WebServer) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>监控配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #45a049; }
-        .test { background: #2196F3; }
-        .back { background: #666; border: 2px solid #333; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; display: inline-block; }
-        .back:hover { background: #555; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style></style>
 </head>
 <body>
-    <div class="container">
-        <h1>🔔 监控配置</h1>
-        <a href="/" class="back">← 返回首页</a>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link active" href="/web/monitor">监控</a>
+    </div></div>
+    <div class="container narrow">
+        <h1>监控配置</h1>
+        <p class="page-desc">配置 Webhook 预警通知</p>
 
         <form id="webhookForm">
             <div class="form-group">
@@ -1102,11 +1078,11 @@ func (ws *WebServer) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
                 <textarea id="events" name="events" rows="3" placeholder="mqtt_error,http_error,collect_error"></textarea>
             </div>
 
-            <button type="button" onclick="saveWebhook()">💾 保存配置</button>
-            <button type="button" class="test" onclick="testWebhook()">🧪 测试发送</button>
+            <button type="button" onclick="saveWebhook()">保存配置</button>
+            <button type="button" class="test" onclick="testWebhook()">测试发送</button>
         </form>
 
-        <div id="result" style="margin-top: 20px;"></div>
+        <div id="result"></div>
     </div>
 
     <script>
@@ -1262,6 +1238,94 @@ func (ws *WebServer) writeJSONStatus(w http.ResponseWriter, status int, success 
 	json.NewEncoder(w).Encode(response)
 }
 
+const baseStyle = `<style>
+:root {
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --text: #1a2332;
+    --text-2: #5a6577;
+    --border: #e2e8f0;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --ok: #16a34a;
+    --danger: #dc2626;
+    --info: #0284c7;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(15,23,42,.08), 0 4px 16px rgba(15,23,42,.06);
+    --font: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+body { font-family: var(--font); margin: 0; background: var(--bg); color: var(--text); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+.topbar { background: #0f172a; }
+.topbar-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; gap: 2px; padding: 0 20px; min-height: 52px; flex-wrap: wrap; }
+.brand { font-weight: 650; font-size: 15px; margin-right: 14px; }
+.brand a { color: #fff; text-decoration: none; }
+.nav-link { color: #94a3b8; text-decoration: none; font-size: 14px; padding: 6px 12px; border-radius: 6px; transition: color .15s, background .15s; }
+.nav-link:hover { color: #fff; background: rgba(255,255,255,.08); }
+.nav-link.active { color: #fff; background: var(--primary); }
+.container { max-width: 1100px; margin: 28px auto; background: var(--surface); padding: 28px 32px 32px; border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); }
+.container.narrow { max-width: 760px; }
+h1 { font-size: 22px; font-weight: 650; margin: 0 0 6px; color: var(--text); }
+.page-desc { color: var(--text-2); font-size: 14px; margin: 0 0 22px; }
+h3 { font-size: 15px; font-weight: 650; margin: 26px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+a.back { display: inline-block; color: var(--text-2); font-size: 13px; text-decoration: none; margin-bottom: 14px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); transition: color .15s, border-color .15s; }
+a.back:hover { color: var(--primary); border-color: var(--primary); }
+.form-group { margin-bottom: 16px; }
+label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+input, select, textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font: inherit; font-size: 14px; background: #fff; color: var(--text); transition: border-color .15s, box-shadow .15s; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+textarea { resize: vertical; min-height: 72px; }
+button { font: inherit; font-size: 14px; font-weight: 600; color: #fff; background: var(--primary); padding: 9px 18px; border: none; border-radius: var(--radius-sm); cursor: pointer; margin-right: 10px; transition: background .15s, transform .1s; }
+button:hover { background: var(--primary-hover); }
+button:active { transform: translateY(1px); }
+button.test { background: var(--info); }
+button.test:hover { background: #0369a1; }
+.btn { padding: 7px 14px; border: none; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; transition: filter .15s; }
+.btn:hover { filter: brightness(1.08); }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-edit { background: var(--info); color: #fff; }
+.btn-secondary { background: #64748b; color: #fff; }
+.success, .error { padding: 10px 14px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; margin-top: 14px; }
+.success { color: #14532d; background: #dcfce7; border: 1px solid #86efac; }
+.error { color: #7f1d1d; background: #fee2e2; border: 1px solid #fca5a5; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; vertical-align: middle; }
+.badge-on { background: var(--ok); }
+.badge-off { background: #94a3b8; }
+.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15,23,42,.55); z-index: 1000; }
+.modal-content { background: var(--surface); margin: 6% auto; padding: 26px 28px; border-radius: var(--radius); width: 90%; max-width: 500px; box-shadow: 0 20px 50px rgba(15,23,42,.3); }
+.modal-content h2 { margin: 0 0 20px; font-size: 18px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+.modal-actions button { margin-right: 0; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 18px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; transition: box-shadow .15s, border-color .15s; }
+.card:hover { box-shadow: var(--shadow); border-color: #cbd5e1; }
+.card.disabled { opacity: .55; }
+.card-name { font-size: 15px; font-weight: 650; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.card-info { color: var(--text-2); font-size: 13px; line-height: 1.7; word-break: break-all; }
+.card-actions { margin-top: 14px; display: flex; gap: 8px; }
+.empty { color: #94a3b8; padding: 28px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); background: #fafbfc; }
+.add-btn { display: inline-block; margin-top: 18px; }
+.preview, .source-selector { padding: 16px 18px; border-radius: var(--radius); margin-top: 18px; font-size: 14px; }
+.preview { background: #eff6ff; border: 1px solid #bfdbfe; }
+.source-selector { background: #fffbeb; border: 1px solid #fde68a; margin-bottom: 20px; }
+.rule-item { background: #f8fafc; padding: 12px 14px; margin: 10px 0; border-radius: var(--radius-sm); border-left: 4px solid var(--primary); cursor: move; font-size: 14px; border-top: 2px solid transparent; }
+.rule-item.dragging { opacity: .45; border-left-color: var(--info); }
+.rule-item.drag-over { border-top-color: var(--info); }
+.rule-buttons { display: inline-block; margin-left: 10px; float: right; }
+.rule-buttons button { padding: 3px 9px; margin-left: 5px; margin-right: 0; font-size: 12px; }
+.http-grid, .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 18px; }
+.http-card, .task-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; transition: box-shadow .15s, border-color .15s; }
+.http-card:hover, .task-card:hover { box-shadow: var(--shadow); border-color: #cbd5e1; }
+.http-card.disabled, .task-card.disabled { opacity: .55; }
+.http-name, .task-name { font-size: 15px; font-weight: 650; margin-bottom: 10px; }
+.http-info, .task-info { color: var(--text-2); font-size: 13px; line-height: 1.7; word-break: break-all; }
+.http-actions, .task-actions { margin-top: 14px; display: flex; gap: 8px; }
+.add-http, .add-task { display: inline-block; margin-top: 18px; }
+</style>
+`
+
 // authSnippet 统一注入所有 Web 页面（renderHTML 是唯一出口，避免逐页修改内嵌脚本）：
 // 给 fetch 自动附加 X-Api-Token，401 时引导输入令牌并落 localStorage 后刷新。
 const authSnippet = `<script>
@@ -1301,7 +1365,7 @@ const authSnippet = `<script>
 
 func (ws *WebServer) renderHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	html = strings.Replace(html, "</head>", authSnippet+"</head>", 1)
+	html = strings.Replace(html, "</head>", baseStyle+authSnippet+"</head>", 1)
 	io.WriteString(w, html)
 }
 
@@ -1921,47 +1985,29 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 <head>
     <title>采集任务配置 - OPC DA Collector</title>
     <meta charset="UTF-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        h1 { color: #333; }
-        .task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 20px; }
-        .task-card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 15px; position: relative; }
-        .task-card.disabled { opacity: 0.6; }
-        .task-name { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 10px; }
-        .task-info { color: #666; font-size: 14px; line-height: 1.6; }
-        .task-actions { margin-top: 10px; display: flex; gap: 8px; }
-        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
-        .btn-primary { background: #4CAF50; color: white; }
-        .btn-danger { background: #f44336; color: white; }
-        .btn-edit { background: #2196F3; color: white; }
-        .btn:hover { opacity: 0.85; }
-        .add-task { background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-top: 15px; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
-        .modal-content { background: white; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-        .success { color: green; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: white; }
-        .badge-on { background: #4CAF50; }
-        .badge-off { background: #999; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style></style>
 </head>
 <body>
+    <div class="topbar"><div class="topbar-inner">
+        <span class="brand"><a href="/">OPC DA Collector</a></span>
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/web/http">数据源</a>
+        <a class="nav-link active" href="/web/tasks">任务</a>
+        <a class="nav-link" href="/web/mqtt">MQTT</a>
+        <a class="nav-link" href="/web/rtdb">RTDB</a>
+        <a class="nav-link" href="/web/transform">转换</a>
+        <a class="nav-link" href="/web/monitor">监控</a>
+    </div></div>
     <div class="container">
-        <a href="/" class="back">← 返回首页</a>
-        <h1>📋 采集任务配置</h1>
-        <p>配置采集任务，绑定数据源</p>
+        <h1>采集任务配置</h1>
+        <p class="page-desc">配置采集任务，绑定数据源</p>
         <div id="result"></div>
 
         <div class="task-grid" id="taskGrid"></div>
 
         <button class="add-task" onclick="openModal()">+ 添加任务</button>
 
-        <!-- 添加/编辑弹窗 -->
         <div class="modal" id="taskModal">
             <div class="modal-content">
                 <h2 id="modalTitle">添加任务</h2>
@@ -1981,7 +2027,7 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
                     <select id="taskSource"></select>
                 </div>
                 <div class="modal-actions">
-                    <button class="btn" onclick="closeModal()" style="background:#666;color:white;">取消</button>
+                    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
                     <button class="btn btn-primary" onclick="saveTask()">保存</button>
                 </div>
             </div>
