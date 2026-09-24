@@ -3,8 +3,14 @@ name: Build C# OPC DA Agent (.NET 4.0 XP Compatible) - Fixed
 on:
   push:
     branches: [ main, develop ]
+    paths:
+      - 'csharp_agent/**'
+      - '.github/workflows/build-csharp-net40-fixed.yml'
   pull_request:
     branches: [ main, develop ]
+    paths:
+      - 'csharp_agent/**'
+      - '.github/workflows/build-csharp-net40-fixed.yml'
   workflow_dispatch:
 
 jobs:
