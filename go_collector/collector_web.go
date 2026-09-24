@@ -750,8 +750,30 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 <input type="text" id="topic" name="topic" placeholder="例如: opc/data">
             </div>
             <div class="form-group">
+                <label>用户名（可选）</label>
+                <input type="text" id="username" name="username" autocomplete="off" placeholder="broker 要求认证时填写">
+            </div>
+            <div class="form-group">
+                <label>密码（可选）</label>
+                <input type="password" id="password" name="password" autocomplete="new-password" placeholder="留空=无密码；已保存则显示 *** 且不修改">
+            </div>
+            <div class="form-group">
+                <label>启用TLS（ssl，通常8883）</label>
+                <select id="tls_enabled" name="tls_enabled">
+                    <option value="false">否 - tcp://</option>
+                    <option value="true">是 - ssl://</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>跳过TLS证书校验</label>
+                <select id="tls_insecure_skip_verify" name="tls_insecure_skip_verify">
+                    <option value="false">否（推荐，校验证书）</option>
+                    <option value="true">是（自签证书应急，不安全）</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label>客户端ID</label>
-                <input type="text" id="client_id" name="client_id" placeholder="例如: opc_collector_01">
+                <input type="text" id="client_id" name="client_id" placeholder="例如: opc_collector_01；留空自动生成">
             </div>
             <div class="form-group">
                 <label>QoS</label>
@@ -814,6 +836,10 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('broker').value = mqtt.broker || '';
                 document.getElementById('port').value = mqtt.port || 1883;
                 document.getElementById('topic').value = mqtt.topic || '';
+                document.getElementById('username').value = mqtt.username || '';
+                document.getElementById('password').value = mqtt.password || '';
+                document.getElementById('tls_enabled').value = mqtt.tls_enabled?.toString() || 'false';
+                document.getElementById('tls_insecure_skip_verify').value = mqtt.tls_insecure_skip_verify?.toString() || 'false';
                 document.getElementById('client_id').value = mqtt.client_id || '';
                 document.getElementById('qos').value = mqtt.qos?.toString() || '1';
                 document.getElementById('retain').value = mqtt.retain?.toString() || 'false';
@@ -841,6 +867,10 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
                 broker: document.getElementById('broker').value,
                 port: parseInt(document.getElementById('port').value),
                 topic: document.getElementById('topic').value,
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                tls_enabled: document.getElementById('tls_enabled').value === 'true',
+                tls_insecure_skip_verify: document.getElementById('tls_insecure_skip_verify').value === 'true',
                 client_id: document.getElementById('client_id').value,
                 qos: parseInt(document.getElementById('qos').value),
                 retain: document.getElementById('retain').value === 'true',
@@ -867,6 +897,10 @@ func (ws *WebServer) handleMqttPage(w http.ResponseWriter, r *http.Request) {
             const mqtt = {
                 broker: document.getElementById('broker').value,
                 port: parseInt(document.getElementById('port').value),
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                tls_enabled: document.getElementById('tls_enabled').value === 'true',
+                tls_insecure_skip_verify: document.getElementById('tls_insecure_skip_verify').value === 'true',
                 client_id: document.getElementById('client_id').value,
                 format: format,
                 split: document.getElementById('split').value === 'true',
@@ -1532,7 +1566,29 @@ func (ws *WebServer) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		ws.writeJSON(w, false, "无法加载配置", nil) // 返回错误信息
 		return
 	}
+	redactSecrets(config)
 	ws.writeJSON(w, true, "配置加载成功", config)
+}
+
+// secretMask GET 回读时占位；写回路径收到该值表示「保持原密文不变」。
+const secretMask = "***"
+
+// redactSecrets 返回给浏览器的配置副本上遮蔽口令/令牌，避免 /api/config 明文外带。
+func redactSecrets(config *AppConfig) {
+	if config == nil {
+		return
+	}
+	if config.WebToken != "" {
+		config.WebToken = secretMask
+	}
+	if config.MqttConfig != nil && config.MqttConfig.Password != "" {
+		config.MqttConfig.Password = secretMask
+	}
+	for _, h := range config.HttpConfigs {
+		if h != nil && h.Token != "" {
+			h.Token = secretMask
+		}
+	}
 }
 
 func (ws *WebServer) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -1846,12 +1902,12 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		if opcServer, ok := mainData["opc_server"].(string); ok {
 			config.OpcServer = opcServer
 		}
-		if webToken, ok := mainData["web_token"].(string); ok {
+		if webToken, ok := mainData["web_token"].(string); ok && webToken != secretMask {
 			config.WebToken = webToken
 		}
 	}
 
-	if webToken, ok := updates["web_token"].(string); ok {
+	if webToken, ok := updates["web_token"].(string); ok && webToken != secretMask {
 		config.WebToken = webToken
 	}
 
@@ -1874,63 +1930,14 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		if username, ok := mqttData["username"].(string); ok {
 			config.MqttConfig.Username = username
 		}
-		if password, ok := mqttData["password"].(string); ok {
+		if password, ok := mqttData["password"].(string); ok && password != secretMask {
 			config.MqttConfig.Password = password
 		}
-		if clientId, ok := mqttData["client_id"].(string); ok {
-			config.MqttConfig.ClientId = clientId
+		if tlsEnabled, ok := mqttData["tls_enabled"].(bool); ok {
+			config.MqttConfig.TlsEnabled = tlsEnabled
 		}
-		if qos, ok := mqttData["qos"].(float64); ok {
-			config.MqttConfig.Qos = int(qos)
-		}
-		if retain, ok := mqttData["retain"].(bool); ok {
-			config.MqttConfig.Retain = retain
-		}
-	}
-
-	if httpConfigsData, ok := updates["http_configs"].([]interface{}); ok {
-		config.HttpConfigs = make([]*HttpConfig, 0)
-		for _, item := range httpConfigsData {
-			if httpData, ok := item.(map[string]interface{}); ok {
-				httpConfig := &HttpConfig{}
-				if name, ok := httpData["name"].(string); ok {
-					httpConfig.Name = name
-				}
-				if enabled, ok := httpData["enabled"].(bool); ok {
-					httpConfig.Enabled = enabled
-				}
-				if url, ok := httpData["url"].(string); ok {
-					httpConfig.Url = url
-				}
-				if token, ok := httpData["token"].(string); ok {
-					httpConfig.Token = token
-				}
-				if method, ok := httpData["method"].(string); ok {
-					httpConfig.Method = method
-				}
-				if timeout, ok := httpData["timeout"].(float64); ok {
-					httpConfig.Timeout = int(timeout)
-				}
-				config.HttpConfigs = append(config.HttpConfigs, httpConfig)
-			}
-		}
-	}
-
-	if mqttData, ok := updates["mqtt"].(map[string]interface{}); ok {
-		if config.MqttConfig == nil {
-			config.MqttConfig = &MqttConfig{}
-		}
-		if enabled, ok := mqttData["enabled"].(bool); ok {
-			config.MqttConfig.Enabled = enabled
-		}
-		if broker, ok := mqttData["broker"].(string); ok {
-			config.MqttConfig.Broker = broker
-		}
-		if port, ok := mqttData["port"].(float64); ok {
-			config.MqttConfig.Port = int(port)
-		}
-		if topic, ok := mqttData["topic"].(string); ok {
-			config.MqttConfig.Topic = topic
+		if tlsInsecure, ok := mqttData["tls_insecure_skip_verify"].(bool); ok {
+			config.MqttConfig.TlsInsecureSkipVerify = tlsInsecure
 		}
 		if clientId, ok := mqttData["client_id"].(string); ok {
 			config.MqttConfig.ClientId = clientId
@@ -1949,6 +1956,44 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 		if split, ok := mqttData["split"].(bool); ok {
 			config.MqttConfig.Split = split
+		}
+	}
+
+	if httpConfigsData, ok := updates["http_configs"].([]interface{}); ok {
+		oldTokens := make(map[string]string, len(config.HttpConfigs))
+		for _, h := range config.HttpConfigs {
+			if h != nil && h.Name != "" {
+				oldTokens[h.Name] = h.Token
+			}
+		}
+		config.HttpConfigs = make([]*HttpConfig, 0)
+		for _, item := range httpConfigsData {
+			if httpData, ok := item.(map[string]interface{}); ok {
+				httpConfig := &HttpConfig{}
+				if name, ok := httpData["name"].(string); ok {
+					httpConfig.Name = name
+				}
+				if enabled, ok := httpData["enabled"].(bool); ok {
+					httpConfig.Enabled = enabled
+				}
+				if url, ok := httpData["url"].(string); ok {
+					httpConfig.Url = url
+				}
+				if token, ok := httpData["token"].(string); ok {
+					if token == secretMask {
+						httpConfig.Token = oldTokens[httpConfig.Name]
+					} else {
+						httpConfig.Token = token
+					}
+				}
+				if method, ok := httpData["method"].(string); ok {
+					httpConfig.Method = method
+				}
+				if timeout, ok := httpData["timeout"].(float64); ok {
+					httpConfig.Timeout = int(timeout)
+				}
+				config.HttpConfigs = append(config.HttpConfigs, httpConfig)
+			}
 		}
 	}
 
@@ -2038,18 +2083,14 @@ func testMqttConnection(config *MqttConfig) error {
 	}
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", config.Broker, config.Port))
+	if err := applyMqttAuthAndTLS(opts, config); err != nil {
+		return err
+	}
 	opts.SetClientID(fmt.Sprintf("opc_collector_test_%d", time.Now().UnixNano()))
 	opts.SetCleanSession(true)
 	opts.SetAutoReconnect(false)
 	opts.SetConnectRetry(false)
 	opts.SetConnectTimeout(5 * time.Second)
-	if config.Username != "" {
-		opts.SetUsername(config.Username)
-	}
-	if config.Password != "" {
-		opts.SetPassword(config.Password)
-	}
 
 	client := mqtt.NewClient(opts)
 	token := client.Connect()

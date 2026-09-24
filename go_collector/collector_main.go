@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -340,9 +341,11 @@ func (c *Collector) Start() error {
 	if c.config.MqttConfig != nil && c.config.MqttConfig.Enabled {
 		c.mqttClient = NewMqttClient(c.config.MqttConfig)
 		if err := c.mqttClient.Connect(); err != nil {
-			return fmt.Errorf("MQTT连接失败: %v", err)
+			// 首连失败不拖死进程：与 RTDB 一致降级为告警，paho 后台重试；IsConnected 为 false 时发布侧跳过
+			log.Printf("⚠️ MQTT连接失败（后台自动重试，期间不发布）: %v", err)
+		} else {
+			fmt.Println("✓ MQTT连接成功")
 		}
-		fmt.Println("✓ MQTT连接成功")
 	}
 
 	if c.config.RtdbConfig != nil && c.config.RtdbConfig.Enabled {
@@ -1092,6 +1095,54 @@ type MqttClient struct {
 	connected bool
 }
 
+// mqttBrokerURL tls_enabled=true 走 ssl://（通常 8883），否则保持 tcp:// 兼容旧配置。
+func mqttBrokerURL(config *MqttConfig) string {
+	scheme := "tcp"
+	if config.TlsEnabled {
+		scheme = "ssl"
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, config.Broker, config.Port)
+}
+
+// mqttTLSConfig 构建 TLS 配置；InsecureSkipVerify 仅现场自签证书应急，生产保持 false。
+func mqttTLSConfig(config *MqttConfig) (*tls.Config, error) {
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: config.TlsInsecureSkipVerify, //nolint:gosec // 现场自签证书开关，由配置显式打开
+	}
+	return tlsCfg, nil
+}
+
+// resolveMqttClientID 空 ClientId 时生成稳定 ID，避免部分 broker 拒绝空 ID。
+func resolveMqttClientID(config *MqttConfig) string {
+	if strings.TrimSpace(config.ClientId) != "" {
+		return config.ClientId
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "collector"
+	}
+	return fmt.Sprintf("opc_%s_%d", host, os.Getpid())
+}
+
+// applyMqttAuthAndTLS 运行连接与「测试连接」共用的 broker/账密/TLS 设置，避免两条路径行为分叉。
+func applyMqttAuthAndTLS(opts *mqtt.ClientOptions, config *MqttConfig) error {
+	opts.AddBroker(mqttBrokerURL(config))
+	if config.Username != "" {
+		opts.SetUsername(config.Username)
+	}
+	if config.Password != "" {
+		opts.SetPassword(config.Password)
+	}
+	if config.TlsEnabled {
+		tlsCfg, err := mqttTLSConfig(config)
+		if err != nil {
+			return err
+		}
+		opts.SetTLSConfig(tlsCfg)
+	}
+	return nil
+}
+
 func NewMqttClient(config *MqttConfig) *MqttClient {
 	c := &MqttClient{
 		config: config,
@@ -1105,32 +1156,36 @@ func NewMqttClient(config *MqttConfig) *MqttClient {
 
 func (c *MqttClient) Connect() error {
 	opts := mqtt.NewClientOptions()
-	broker := fmt.Sprintf("tcp://%s:%d", c.config.Broker, c.config.Port)
-	opts.AddBroker(broker)
-	opts.SetClientID(c.config.ClientId)
-
-	// 设置用户名密码
-	if c.config.Username != "" {
-		opts.SetUsername(c.config.Username)
+	if err := applyMqttAuthAndTLS(opts, c.config); err != nil {
+		return err
 	}
-	if c.config.Password != "" {
-		opts.SetPassword(c.config.Password)
-	}
-
-	// 设置 QoS 和 Retain
+	opts.SetClientID(resolveMqttClientID(c.config))
 	opts.SetCleanSession(true)
+	opts.SetAutoReconnect(true)
+	opts.SetConnectRetry(true)
+	opts.SetConnectRetryInterval(5 * time.Second)
+	opts.SetConnectTimeout(10 * time.Second)
+	opts.SetKeepAlive(30 * time.Second)
+	opts.SetOrderMatters(false)
+	opts.SetOnConnectHandler(func(mqtt.Client) {
+		log.Println("✅ MQTT已连接（含自动重连）")
+	})
+	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		log.Printf("⚠️ MQTT连接断开，自动重连中: %v", err)
+	})
 
-	// 创建客户端
 	c.client = mqtt.NewClient(opts)
-
-	// 连接
 	token := c.client.Connect()
-	if token.Wait() && token.Error() != nil {
+	// ConnectRetry 成功前 token 不结束：限时等待，超时则交给后台继续重试，避免 Start 卡死
+	if !token.WaitTimeout(10 * time.Second) {
+		return fmt.Errorf("MQTT连接超时（10秒，后台仍在重试）")
+	}
+	if token.Error() != nil {
 		return fmt.Errorf("MQTT连接失败: %v", token.Error())
 	}
 
 	c.connected = true
-	log.Printf("✅ MQTT已连接到 %s", broker)
+	log.Printf("✅ MQTT已连接到 %s", mqttBrokerURL(c.config))
 	return nil
 }
 
@@ -1286,9 +1341,14 @@ func (c *MqttClient) Publish(message map[string]interface{}, source string) erro
 }
 
 func (c *MqttClient) Disconnect() {
-	if c.client != nil && c.client.IsConnected() {
-		c.client.Disconnect(250)
-		c.connected = false
+	if c.client == nil {
+		return
+	}
+	// 即使未连上也要 Disconnect，取消 ConnectRetry 后台重试
+	wasUp := c.client.IsConnected()
+	c.client.Disconnect(250)
+	c.connected = false
+	if wasUp {
 		log.Println("📴 MQTT已断开连接")
 	}
 }

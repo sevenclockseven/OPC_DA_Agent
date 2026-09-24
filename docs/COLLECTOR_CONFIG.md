@@ -230,6 +230,8 @@ tag_dbn9=20251_M4202_CDBH
 | `client_id` | string | 客户端ID | opc_collector_01 |
 | `qos` | int | 服务质量 | 0/1/2 |
 | `retain` | bool | 保留消息 | False |
+| `tls_enabled` | bool | 启用TLS（ssl://，通常8883） | False |
+| `tls_insecure_skip_verify` | bool | 跳过TLS证书校验（自签应急） | False |
 
 ### [http] HTTP配置
 

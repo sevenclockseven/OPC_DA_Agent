@@ -124,6 +124,8 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.MqttConfig.Format = section.Key("format").String()
 		config.MqttConfig.JsTransform = section.Key("js_transform").String()
 		config.MqttConfig.Split, _ = section.Key("split").Bool()
+		config.MqttConfig.TlsEnabled, _ = section.Key("tls_enabled").Bool()
+		config.MqttConfig.TlsInsecureSkipVerify, _ = section.Key("tls_insecure_skip_verify").Bool()
 	}
 
 	if section := cfg.Section("rtdb"); section != nil {
@@ -243,6 +245,8 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		section.NewKey("format", config.MqttConfig.Format)
 		section.NewKey("js_transform", config.MqttConfig.JsTransform)
 		section.NewKey("split", fmt.Sprintf("%v", config.MqttConfig.Split))
+		section.NewKey("tls_enabled", fmt.Sprintf("%v", config.MqttConfig.TlsEnabled))
+		section.NewKey("tls_insecure_skip_verify", fmt.Sprintf("%v", config.MqttConfig.TlsInsecureSkipVerify))
 	}
 
 	for i, httpConfig := range config.HttpConfigs {
@@ -327,6 +331,11 @@ func (cm *ConfigManager) ToIniString(config *AppConfig) string {
 		section.NewKey("client_id", config.MqttConfig.ClientId)
 		section.NewKey("qos", fmt.Sprintf("%d", config.MqttConfig.Qos))
 		section.NewKey("retain", fmt.Sprintf("%v", config.MqttConfig.Retain))
+		section.NewKey("format", config.MqttConfig.Format)
+		section.NewKey("js_transform", config.MqttConfig.JsTransform)
+		section.NewKey("split", fmt.Sprintf("%v", config.MqttConfig.Split))
+		section.NewKey("tls_enabled", fmt.Sprintf("%v", config.MqttConfig.TlsEnabled))
+		section.NewKey("tls_insecure_skip_verify", fmt.Sprintf("%v", config.MqttConfig.TlsInsecureSkipVerify))
 	}
 
 	for i, httpConfig := range config.HttpConfigs {

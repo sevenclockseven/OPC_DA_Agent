@@ -23,9 +23,11 @@ port      = 1883           # MQTT端口（默认1883）
 topic     = /opc/test      # 发布主题
 username  =                 # 用户名（可选）
 password  =                 # 密码（可选）
-client_id = opc_collector_01 # 客户端ID（必须唯一）
+client_id = opc_collector_01 # 客户端ID（必须唯一；留空自动生成）
 qos       = 1              # 服务质量等级（0/1/2）
 retain    = false          # 是否保留消息
+tls_enabled = false          # true=ssl://（通常8883）
+tls_insecure_skip_verify = false # 跳过证书校验（自签应急，不安全）
 ```
 
 ### 配置示例
@@ -59,6 +61,20 @@ port      = 1883
 topic     = /opc/data
 username  = opc_user
 password  = opc_password
+client_id = opc_collector_01
+```
+
+#### 4. TLS / 8883（如 HiveMQ 等要求加密的 broker）
+```ini
+[mqtt]
+enabled   = true
+broker    = broker.hivemq.com
+port      = 8883
+topic     = /opc/data
+username  = opc_user
+password  = opc_password
+tls_enabled = true
+tls_insecure_skip_verify = false
 client_id = opc_collector_01
 ```
 

@@ -157,6 +157,11 @@ enabled=True
 broker=172.16.32.98
 port=1883
 topic=opc/data
+username=
+password=
+tls_enabled=False
+tls_insecure_skip_verify=False
+client_id=opc_collector_01
 format=full
 split=false
 js_transform=
@@ -169,6 +174,11 @@ tag_dbn1=device1_value
 ```
 
 MQTT 输出格式（`[mqtt]` 段）：
+
+- `username` / `password`：broker 要求认证时填写；Web UI「MQTT」页可配置，`GET /api/config` 回读密码为 `***`（写回 `***` 表示不修改）。
+- `tls_enabled`：`True` 时用 `ssl://` 连接（通常 8883）；默认 `False` 保持 `tcp://`。
+- `tls_insecure_skip_verify`：跳过 TLS 证书校验（现场自签应急，默认 `False`）。
+- `client_id`：留空时自动生成 `opc_<hostname>_<pid>`，避免 broker 拒绝空 ID。
 
 - `format`：发布报文格式。
   - `full`（默认）：整包 JSON `{"timestamp":...,"values":{...},"metadata":{...}}`，与旧版一致。
