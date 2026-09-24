@@ -24,15 +24,22 @@
 
 ## 编译命令
 
-bash
-# Windows 交叉编译
+```bash
+# Windows 交叉编译 Linux 包（必须 GOOS=linux，否则会编出 Windows PE）
 build_collector.bat
+# 产物: dist/collector_linux_amd64（ELF，CGO_ENABLED=0）
 
 # Linux 原生编译
-go build -o collector collector_main.go ConfigManager.go collector_web.go KeyTransformer.go Types.go
+export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
+go build -ldflags "-s -w" -o dist/collector_linux_amd64 \
+  collector_main.go ConfigManager.go collector_web.go KeyTransformer.go Types.go
 
 # 运行
-./collector --config collector.ini --web-port 9090
+chmod +x dist/collector_linux_amd64
+./dist/collector_linux_amd64 --config collector.ini --web-port 9090
+```
+
+> 交叉编译务必 `set GOOS=linux` + `CGO_ENABLED=0`。若在 Windows 上未设 `GOOS`，`go build` 默认产出 PE（`MZ` 头），拷到 Linux 会报 `cannot execute binary file: Exec format error`。校验：`head -c 4` 应为 `7f 45 4c 46`（ELF）。
 
 ## Web 界面
 启动后访问：http://localhost:9090/
