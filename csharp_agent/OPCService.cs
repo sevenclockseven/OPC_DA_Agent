@@ -40,6 +40,12 @@ namespace OPC_DA_Agent
         private Thread _ssePublisher;
         private System.Threading.Timer _snapshotTimer;
 
+        // OPC 自动重连看门狗：仅 !IsConnected 时调用已有 Reconnect()；Stop/Dispose 置位后不再动作
+        private System.Threading.Timer _reconnectTimer;
+        private volatile bool _autoReconnectStopped = false;
+        private int _reconnectFailCount = 0;
+        private const int ReconnectBackoffCapMs = 60000;
+
         private long _totalReads = 0;
         private long _totalErrors = 0;
         private DateTime _startTime;
@@ -191,6 +197,7 @@ namespace OPC_DA_Agent
             if (_opcServer == null || _opcServer.ServerState != 1)
             {
                 _logger.Error("OPC服务器未连接，无法启动数据采集");
+                EnsureAutoReconnect();
                 return false;
             }
 
@@ -235,11 +242,13 @@ namespace OPC_DA_Agent
                 }
 
                 _logger.Info("OPC数据采集已启动");
+                EnsureAutoReconnect();
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.Error("启动数据采集失败", ex);
+                EnsureAutoReconnect();
                 return false;
             }
         }
@@ -406,6 +415,11 @@ namespace OPC_DA_Agent
 
         public void Stop()
         {
+            _autoReconnectStopped = true;
+            if (_reconnectTimer != null)
+            {
+                try { _reconnectTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
+            }
             _sseRunning = false;
             if (_snapshotTimer != null)
             {
@@ -445,6 +459,97 @@ namespace OPC_DA_Agent
                 if (!Connect()) return false;
                 return Start();
             }
+        }
+
+        /// <summary>
+        /// 启动/复位自动重连看门狗（配置 opc_reconnect_interval_ms&gt;0 时生效）。
+        /// 由 Start() 成败路径调用；与 SettingsForm 手动 Reconnect 共用 _reconnectLock。
+        /// </summary>
+        private void EnsureAutoReconnect()
+        {
+            int interval = _config.OpcReconnectIntervalMs;
+            if (interval <= 0) return;
+            _autoReconnectStopped = false;
+            if (_reconnectTimer == null)
+            {
+                _reconnectTimer = new System.Threading.Timer(
+                    ReconnectWatchdogTick, null, interval, Timeout.Infinite);
+                _logger.Info(string.Format("已启用OPC自动重连看门狗，探测间隔={0}ms", interval));
+            }
+            else
+            {
+                try { _reconnectTimer.Change(interval, Timeout.Infinite); } catch { }
+            }
+        }
+
+        private void ReconnectWatchdogTick(object state)
+        {
+            if (_autoReconnectStopped) return;
+
+            try
+            {
+                if (IsConnected)
+                {
+                    if (_reconnectFailCount != 0)
+                    {
+                        _reconnectFailCount = 0;
+                        _logger.Info("OPC连接正常，自动重连看门狗待命");
+                    }
+                    ScheduleReconnectWatchdog(_config.OpcReconnectIntervalMs);
+                    return;
+                }
+
+                // 首次进入未连接：记一条；其后失败按次数退避，避免服务器长时间不可用时刷屏
+                if (_reconnectFailCount == 0)
+                {
+                    _logger.Warn("OPC未连接，开始自动重连");
+                }
+
+                bool ok = Reconnect();
+                if (ok)
+                {
+                    _reconnectFailCount = 0;
+                    _logger.Info("OPC自动重连成功");
+                    ScheduleReconnectWatchdog(_config.OpcReconnectIntervalMs);
+                    return;
+                }
+
+                _reconnectFailCount++;
+                int delay = NextReconnectDelayMs();
+                // 失败日志节流：第 1 次必打，之后约每 6 次（随退避约 30s+）打一条
+                if (_reconnectFailCount == 1 || _reconnectFailCount % 6 == 0)
+                {
+                    _logger.Error(string.Format(
+                        "OPC自动重连失败（第{0}次），{1}ms后重试", _reconnectFailCount, delay));
+                }
+                ScheduleReconnectWatchdog(delay);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("OPC自动重连看门狗异常", ex);
+                if (!_autoReconnectStopped)
+                {
+                    ScheduleReconnectWatchdog(Math.Max(_config.OpcReconnectIntervalMs, 1000));
+                }
+            }
+        }
+
+        // 失败退避：基间隔 × 2^n，封顶 ReconnectBackoffCapMs；基间隔取配置值（至少 1s）
+        private int NextReconnectDelayMs()
+        {
+            int baseMs = Math.Max(_config.OpcReconnectIntervalMs, 1000);
+            int shift = Math.Min(_reconnectFailCount - 1, 6);
+            if (shift < 0) shift = 0;
+            long delay = (long)baseMs << shift;
+            if (delay > ReconnectBackoffCapMs) delay = ReconnectBackoffCapMs;
+            return (int)delay;
+        }
+
+        private void ScheduleReconnectWatchdog(int delayMs)
+        {
+            if (_autoReconnectStopped || _reconnectTimer == null) return;
+            if (delayMs < 250) delayMs = 250;
+            try { _reconnectTimer.Change(delayMs, Timeout.Infinite); } catch { }
         }
 
         private void TeardownConnection()
@@ -976,6 +1081,12 @@ namespace OPC_DA_Agent
 
         public void Dispose()
         {
+            _autoReconnectStopped = true;
+            if (_reconnectTimer != null)
+            {
+                try { _reconnectTimer.Dispose(); } catch { }
+                _reconnectTimer = null;
+            }
             Stop();
             _browseCache.Clear();
             if (_opcGroup != null)

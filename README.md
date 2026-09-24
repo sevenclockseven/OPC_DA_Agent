@@ -132,6 +132,7 @@ Web UI: `http://<ip>:9090/`
   "opc_server_url": "opcda://192.168.111.21/Freelance2000OPCServer.42.1",
   "http_port": 8080,
   "api_token": "",
+  "opc_reconnect_interval_ms": 5000,
   "tags_file": "tags.json",
   "log_file": "logs\\opc_agent.log",
   "log_level": "Info"
@@ -141,6 +142,7 @@ Web UI: `http://<ip>:9090/`
 - 服务器地址用 `opc_server_prog_id` + `opc_server_host`，或等价的 `opc_server_url`（`opcda://host/progid`）。
 - `api_token`：API 访问令牌，空 = 不启用鉴权（默认）。非空时所有 `/api/*` 请求必须携带，见「安全 / API 认证」。
 - `tags_file`：标签持久化文件，默认 `tags.json`（与 config.json 同级，可单独指定路径）。
+- `opc_reconnect_interval_ms`：OPC 自动重连看门狗探测间隔（毫秒），默认 `5000`。未连接时按该节拍调用 `Reconnect()`（失败退避至最多 60s）；`0` = 关闭自动重连。OPC 服务器重启/闪断后无需重启代理进程。
 
 ### collector.ini（Go 采集器）
 

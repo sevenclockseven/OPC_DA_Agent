@@ -78,6 +78,11 @@ namespace OPC_DA_Agent
         [JsonProperty("sse_snapshot_interval_ms")]
         public int SseSnapshotIntervalMs { get; set; } = 1000;
 
+        // OPC 自动重连看门狗探测间隔（毫秒）：>0 时未连接则按该节拍尝试 Reconnect（失败退避、封顶 60s）；
+        // =0 关闭自动重连（仅启动/设置里手动重连）
+        [JsonProperty("opc_reconnect_interval_ms")]
+        public int OpcReconnectIntervalMs { get; set; } = 5000;
+
         [JsonProperty("enable_compression")]
         public bool EnableCompression { get; set; } = true;
 
@@ -170,6 +175,11 @@ namespace OPC_DA_Agent
                 errors.Add("批次大小必须大于0");
             }
 
+            if (OpcReconnectIntervalMs < 0)
+            {
+                errors.Add("OPC自动重连间隔不能为负数");
+            }
+
             // 允许 tags 为空：用户可以先启动程序连接 OPC 服务器，再通过 Web UI 浏览并选择标签
 
             return errors.Count == 0;
@@ -186,6 +196,7 @@ namespace OPC_DA_Agent
                 HttpPort = 8080,
                 UpdateInterval = 1000,
                 BatchSize = 500,
+                OpcReconnectIntervalMs = 5000,
                 TagsFile = "tags.json",
                 LogFile = "logs\\opc_agent.log",
                 LogLevel = "Info"
