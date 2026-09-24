@@ -595,7 +595,8 @@ namespace OPC_DA_Agent
 
         private void BroadcastSse(List<TagValue> values)
         {
-            var payload = JsonConvert.SerializeObject(new { ts = DateTime.Now, values = values });
+            // opc_connected：随帧透传 OPC 会话状态；空 values + false = 源掉线心跳，非“无数据可推”
+            var payload = JsonConvert.SerializeObject(new { ts = DateTime.Now, opc_connected = IsConnected, values = values });
             var line = "data: " + payload + "\n\n";
             List<StreamWriter> dead = null;
             lock (_sseLock)
@@ -640,10 +641,24 @@ namespace OPC_DA_Agent
         }
 
         // 秒级快照：把当前缓存的最新值拷成快照推一次 SSE。定时器线程（线程池 MTA）执行，
-        // 仅短暂加锁拷贝字典、检查客户端数，不碰任何 COM，故不会与 STA 线程上的 OnDataChange 形成死锁。
+        // 仅短暂加锁拷贝字典、检查客户端数与 ServerState，不与 STA 上的 OnDataChange 共享 _sseLock 长持有，避免死锁。
         private void SnapshotTick(object state)
         {
             if (!_sseRunning) return;
+
+            // 无 SSE 客户端时不浪费工作
+            lock (_sseLock)
+            {
+                if (_sseClients.Count == 0) return;
+            }
+
+            // OPC 断开：_lastValues 是断线前陈旧值，不能以 Good + 当前时间伪装成实时数据。
+            // 仍入队空帧，由 BroadcastSse 标 opc_connected=false，让 Go 能区分“无变化”和“源已掉线”。
+            if (!IsConnected)
+            {
+                _sseQueue.Add(new List<TagValue>());
+                return;
+            }
 
             List<TagValue> snapshot;
             lock (_lock)
@@ -669,12 +684,6 @@ namespace OPC_DA_Agent
                 }
             }
             if (snapshot.Count == 0) return;
-
-            // 无 SSE 客户端时不浪费工作
-            lock (_sseLock)
-            {
-                if (_sseClients.Count == 0) return;
-            }
 
             _sseQueue.Add(snapshot);
         }

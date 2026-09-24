@@ -226,9 +226,11 @@ curl "http://localhost:8080/api/stream?token=<令牌>"
 SSE 帧格式（`text/event-stream`，15s 心跳 `: ping`）：
 
 ```
-data: {"ts":"2026-...","values":[{"key":"<nodeId>","value":...,"quality":"Good","timestamp":"..."}]}
+data: {"ts":"2026-...","opc_connected":true,"values":[{"key":"<nodeId>","value":...,"quality":"Good","timestamp":"..."}]}
 
 ```
+
+`opc_connected`：OPC 会话是否在线。代理断线时**不再**把陈旧 `_lastValues` 以 `Good`+当前时间外发，改为推送 `values:[]` 且 `opc_connected:false` 的心跳帧，采集器据此标记源掉线（任务卡片显示「OPC未连接」）。
 
 代理默认按 `sse_snapshot_interval_ms`（默认 1000ms）的固定节拍把当前全部最新值做一次全量快照推送，保证订阅值不变时采集器仍持续收到秒级数据；值发生变化时另由 `OnDataChange` 即时补推。设 `0` 则退回纯变化驱动。
 

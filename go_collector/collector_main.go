@@ -238,6 +238,8 @@ type TaskRunner struct {
 	statMissing     int
 	statMissingKeys []string
 	statWarming     bool
+	opcConnected    bool // 最近一帧 opc_connected；false=代理上报 OPC 会话已断
+	opcKnown        bool // 是否已收到过带 opc_connected 的帧（旧代理无此字段则保持未知）
 }
 
 // TaskStatSnapshot 任务批次质量只读快照（JSON 输出给 Web 任务卡片）
@@ -253,6 +255,8 @@ type TaskStatSnapshot struct {
 	ExpectedErr string    `json:"expected_err"`
 	HasWindow   bool      `json:"has_window"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// OpcConnected: nil=未知（旧 C# 代理未带字段）；false=代理已报告 OPC 断开
+	OpcConnected *bool `json:"opc_connected"`
 }
 
 // Stats 返回最近窗口快照；expected 取当前期望集实时长度（30s 内可能已刷新），
@@ -283,6 +287,13 @@ func (tr *TaskRunner) Stats() TaskStatSnapshot {
 		ExpectedErr: tr.expectedErr,
 		HasWindow:   !tr.statUpdatedAt.IsZero(),
 		UpdatedAt:   tr.statUpdatedAt,
+		OpcConnected: func() *bool {
+			if !tr.opcKnown {
+				return nil
+			}
+			v := tr.opcConnected
+			return &v
+		}(),
 	}
 }
 
@@ -517,11 +528,14 @@ func (tr *TaskRunner) handleSsePayload(collector *Collector, payload string) {
 	var envelope struct {
 		Ts     string                   `json:"ts"`
 		Values []map[string]interface{} `json:"values"`
+		// 可选：新代理在每帧透传 OPC 会话状态；缺省则不改 opcKnown（兼容旧代理）
+		OpcConnected *bool `json:"opc_connected"`
 	}
 	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
 		log.Printf("SSE 报文解析失败: %v", err)
 		return
 	}
+	tr.noteOpcConnected(envelope.OpcConnected)
 	if len(envelope.Values) == 0 {
 		return
 	}
@@ -673,6 +687,27 @@ func (tr *TaskRunner) maybeRefreshExpected(client *HttpClient) {
 	label := tr.taskLabel
 	tr.statMu.Unlock()
 	log.Printf("批次质量期望集已刷新 [%s]: %d 个标签（C# 代理需 ≥ 本批次版本以对齐 key 口径）", label, n)
+}
+
+// noteOpcConnected 记录 SSE 帧上的 OPC 连接状态；状态翻转打一条日志（只关心边沿，不刷屏）。
+func (tr *TaskRunner) noteOpcConnected(connected *bool) {
+	if connected == nil {
+		return
+	}
+	tr.statMu.Lock()
+	changed := !tr.opcKnown || tr.opcConnected != *connected
+	tr.opcConnected = *connected
+	tr.opcKnown = true
+	label := tr.taskLabel
+	tr.statMu.Unlock()
+	if !changed {
+		return
+	}
+	if *connected {
+		log.Printf("OPC连接 [%s]: 已连接", label)
+	} else {
+		log.Printf("OPC连接 [%s]: 未连接，停止把陈旧缓存当实时值转发", label)
+	}
 }
 
 // noteBatch 把本批 key 并入 10s 统计窗口，窗口到期输出一条汇总并重置。

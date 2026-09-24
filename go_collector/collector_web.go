@@ -2255,6 +2255,9 @@ func (ws *WebServer) handleTasksPage(w http.ResponseWriter, r *http.Request) {
                 if (st && st.expected_err) {
                     tagLine += ' · 期望集拉取失败';
                 }
+                if (st && st.opc_connected === false) {
+                    tagLine += ' · OPC未连接';
+                }
                 const card = document.createElement('div');
                 card.className = 'task-card' + (enabled ? '' : ' disabled');
                 card.innerHTML =
