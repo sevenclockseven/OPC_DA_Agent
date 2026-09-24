@@ -67,6 +67,28 @@ namespace OPC_DA_Agent
             return Path.Combine(string.IsNullOrEmpty(dir) ? "." : dir, name);
         }
 
+        // 数据面 key 统一为服务器权威 ItemID：浏览路径 node_id 带根节点前缀（可能含非 ASCII
+        // 乱码），不是 OPC 实际标签名，不应作为下游 key（SSE/_lastValues/GET /api/tags）
+        private static void NormalizeTags(List<TagConfig> tags)
+        {
+            if (tags == null) return;
+            foreach (var tag in tags)
+            {
+                if (tag != null && !string.IsNullOrWhiteSpace(tag.ItemId))
+                    tag.NodeId = tag.ItemId;
+            }
+        }
+
+        // SAFEARRAY 元素转 int：越界/类型不符返回 false 由调用方决定跳过或计数，
+        // 避免在回调/批量循环里写空 catch 吞错
+        private static bool TryGetInt(Array arr, int index, out int value)
+        {
+            value = 0;
+            if (arr == null || index < 0 || index >= arr.Length) return false;
+            try { value = Convert.ToInt32(arr.GetValue(index)); return true; }
+            catch (Exception) { return false; }
+        }
+
         private List<TagConfig> LoadTagsFromFile()
         {
             var path = ResolveTagsFilePath();
@@ -75,7 +97,11 @@ namespace OPC_DA_Agent
                 try
                 {
                     var tags = JsonConvert.DeserializeObject<List<TagConfig>>(File.ReadAllText(path));
-                    if (tags != null) return tags;
+                    if (tags != null)
+                    {
+                        NormalizeTags(tags);
+                        return tags;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -180,6 +206,9 @@ namespace OPC_DA_Agent
                 _opcGroup.UpdateRate = _config.UpdateInterval;
 
                 _opcItems = _opcGroup.OPCItems;
+                // OPC 规范：inactive 项不参与 DataChange 回调；AddItems 新项的默认激活态由此属性决定，
+                // 不显式置 true 时新订阅项可能永远收不到推送（"订阅成功但无数据"嫌疑之一）
+                _opcItems.DefaultIsActive = true;
 
                 if (_tags.Count > 0)
                 {
@@ -237,7 +266,8 @@ namespace OPC_DA_Agent
                         string subscribeId = string.IsNullOrEmpty(tag.ItemId) ? tag.NodeId : tag.ItemId;
                         opcItemIDs.Add(subscribeId);
                         clientHandles.Add(opcItemIDs.Count - 1);  // 句柄 = 1-based 项索引
-                        // 数据面 key（SSE/_lastValues/_clientHandleNodes）保持 NodeId 不变，下游转换规则零破坏
+                        // 数据面 key（SSE/_lastValues/_clientHandleNodes）用 NodeId；
+                        // NormalizeTags 已把有 ItemId 的标签 NodeId 规范为 ItemID，key 即 OPC 真实标签名
                         nodeByHandle.Add(tag.NodeId);
                     }
                 }
@@ -262,8 +292,8 @@ namespace OPC_DA_Agent
 
                 // AddItems 是 COM 调用，必须在锁外执行：该调用被封送到 OPC 的宿主 STA 线程，
                 // 若持 _lock 期间发起，会与同样需要 _lock 的 OnDataChange（也在该 STA 线程）形成死锁。
-                // 不做逐项首读：OPC DA 订阅语义下，加入已订阅组的新项由服务器在下一个更新节拍
-                // 以 DataChange 推送初值，逐项 Read 的 O(N) 串行 COM 往返是大标签集保存超时的根因。
+                // 不做逐项 Read：逐项的 O(N) 串行 COM 往返是大标签集保存超时的根因（6f53daa 已删）；
+                // 初值改用下方组级批量 SyncRead（一次 COM 往返）兜底。
                 Array serverHandles = null;
                 if (opcItemIDs.Count > 1)
                 {
@@ -277,6 +307,9 @@ namespace OPC_DA_Agent
                     // 逐项检查 AddItems 错误码（与句柄数组同为 1-based 对齐，索引 0 为占位）：
                     // ItemID 不被服务器接受时此前是静默失败，用户无法从日志判断标签是否真正订阅成功
                     int failCount = 0;
+                    int handleParseFail = 0;
+                    var syncIdx = new List<int>();       // 成功项原索引（映射 nodeByHandle）
+                    var syncHandles = new List<int>();   // 对应真实 server handle（SyncRead 子集）
                     if (errors != null)
                     {
                         for (int i = 1; i < errors.Length && i < opcItemIDs.Count; i++)
@@ -294,10 +327,75 @@ namespace OPC_DA_Agent
                                 _logger.Warn(string.Format("OPC标签添加失败 key=[{0}] ItemID={1} 错误=0x{2:X8}",
                                     i < nodeByHandle.Count ? nodeByHandle[i] : "?", opcItemIDs[i], err));
                             }
+                            else if (serverHandles != null)
+                            {
+                                // 成功项收集真实句柄供批量 SyncRead；失败项句柄为 0 需过滤
+                                int sh;
+                                if (TryGetInt(serverHandles, i, out sh) && sh > 0)
+                                {
+                                    syncIdx.Add(i);
+                                    syncHandles.Add(sh);
+                                }
+                                else handleParseFail++;
+                            }
                         }
                     }
-                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签（失败 {2}），初值由订阅推送补齐",
+                    _logger.Info(string.Format("已添加 {0}/{1} 个OPC标签（失败 {2}）",
                         opcItemIDs.Count - 1 - failCount, _tags.Count, failCount));
+                    if (handleParseFail > 0)
+                        _logger.Warn(string.Format("{0} 个成功项句柄解析失败，跳过其初值兜底（DataChange 仍可补齐）", handleParseFail));
+
+                    // 批量 SyncRead 初值兜底（Source=1 读订阅组缓存，一次 COM 往返）：
+                    // Freelance 等服务器不给新订阅项推初值时 _lastValues 恒为 null、快照跳过 → 下游无数据；
+                    // 仅 Good 质量回填，Bad 不写伪数据；失败不致命（DefaultIsActive+DataChange 兜底）
+                    if (syncHandles.Count > 0)
+                    {
+                        try
+                        {
+                            var sw = System.Diagnostics.Stopwatch.StartNew();
+                            int subCount = syncHandles.Count;
+                            Array subArray = new object[subCount + 1];
+                            for (int j = 0; j < subCount; j++) subArray.SetValue(syncHandles[j], j + 1);
+                            Array readValues, readErrors;
+                            object readQualities, readTimestamps;
+                            _opcGroup.SyncRead(1, subCount, ref subArray,
+                                out readValues, out readErrors, out readQualities, out readTimestamps);
+
+                            int okCount = 0;
+                            var pending = new List<KeyValuePair<string, object>>();
+                            Array qArr = readQualities as Array;
+                            for (int j = 1; j <= subCount; j++)
+                            {
+                                int err;
+                                if (!TryGetInt(readErrors, j, out err) || err != 0) continue;
+                                int q = 0;
+                                if (qArr != null) TryGetInt(qArr, j, out q);
+                                if ((q & 0xC0) != 0xC0) continue;
+                                object v = readValues.GetValue(j);
+                                if (v == null || v is DBNull) continue;
+                                int origIdx = syncIdx[j - 1];
+                                if (origIdx < nodeByHandle.Count && !string.IsNullOrEmpty(nodeByHandle[origIdx]))
+                                {
+                                    pending.Add(new KeyValuePair<string, object>(nodeByHandle[origIdx], v));
+                                    okCount++;
+                                }
+                            }
+                            if (pending.Count > 0)
+                            {
+                                lock (_lock)
+                                {
+                                    foreach (var kv in pending) _lastValues[kv.Key] = kv.Value;
+                                }
+                            }
+                            sw.Stop();
+                            _logger.Info(string.Format("批量初值读取完成: 成功 {0}/{1}, 耗时 {2}ms",
+                                okCount, subCount, sw.ElapsedMilliseconds));
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Warn("批量初值读取失败: " + ex.Message);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -435,27 +533,38 @@ namespace OPC_DA_Agent
                     string nodeId = _clientHandleNodes[handle];
                     if (string.IsNullOrEmpty(nodeId)) continue;
 
-                    object value = itemValues.GetValue(i);
-                    int q = 0;
-                    try { q = Convert.ToInt32(qualities.GetValue(i)); } catch { }
-                    string qualityStr = (q & 0xC0) == 0xC0 ? "Good" : "Bad";
-                    DateTime timestamp = timeStamps.GetValue(i) is DateTime ? (DateTime)timeStamps.GetValue(i) : DateTime.Now;
+                    // 单项隔离：回调数组中某项转换/访问抛异常只丢该项；
+                    // 否则会跳到方法级 catch，把本批排在其后的所有项一并丢弃
+                    //（现场表现："前面有读不出的标签，后边整段不推 stream"）
+                    try
+                    {
+                        object value = itemValues.GetValue(i);
+                        int q = 0;
+                        try { q = Convert.ToInt32(qualities.GetValue(i)); } catch { }
+                        string qualityStr = (q & 0xC0) == 0xC0 ? "Good" : "Bad";
+                        DateTime timestamp = timeStamps.GetValue(i) is DateTime ? (DateTime)timeStamps.GetValue(i) : DateTime.Now;
 
-                    lock (_lock)
-                    {
-                        _lastValues[nodeId] = value;
+                        lock (_lock)
+                        {
+                            _lastValues[nodeId] = value;
+                        }
+                        changed.Add(new TagValue
+                        {
+                            Key = nodeId,
+                            Value = value,
+                            Quality = qualityStr,
+                            Timestamp = timestamp,
+                            Status = qualityStr,
+                            DataType = value == null ? null : value.GetType().Name,
+                            NodeId = nodeId,
+                            Name = nodeId
+                        });
                     }
-                    changed.Add(new TagValue
+                    catch
                     {
-                        Key = nodeId,
-                        Value = value,
-                        Quality = qualityStr,
-                        Timestamp = timestamp,
-                        Status = qualityStr,
-                        DataType = value == null ? null : value.GetType().Name,
-                        NodeId = nodeId,
-                        Name = nodeId
-                    });
+                        // 计数不刷屏：坏项高频出现时从 /api/status 的 totalErrors 可见
+                        System.Threading.Interlocked.Increment(ref _totalErrors);
+                    }
                 }
 
                 if (changed.Count > 0)
@@ -794,21 +903,40 @@ namespace OPC_DA_Agent
                 {
                     try
                     {
-                        int count = _opcItems.Count;
-                        if (count > 0)
+                        if (_serverHandles != null)
                         {
-                            Array handles = new object[count + 1];
-                            for (int i = 1; i <= count; i++)
+                            // 用 AddItems 返回的真实 server handle 删除（1-based，过滤 0/无效句柄）：
+                            // 硬编码 handles[i]=i 与真实句柄不匹配时 Remove 静默失败，
+                            // 组内项残留会让后续保存的组持续膨胀
+                            var validHandles = new List<int>();
+                            for (int i = 1; i < _serverHandles.Length; i++)
                             {
-                                handles.SetValue(i, i);
+                                int h;
+                                if (TryGetInt(_serverHandles, i, out h) && h > 0) validHandles.Add(h);
                             }
-                            Array errors;
-                            _opcItems.Remove(count, ref handles, out errors);
+                            if (validHandles.Count > 0)
+                            {
+                                Array handles = new object[validHandles.Count + 1];
+                                for (int i = 0; i < validHandles.Count; i++)
+                                    handles.SetValue(validHandles[i], i + 1);
+                                Array errors;
+                                _opcItems.Remove(validHandles.Count, ref handles, out errors);
+                            }
+                            _serverHandles = null;
+                        }
+                        else if (_opcItems.Count > 0)
+                        {
+                            // 句柄未知时不猜测删除：错删其它项的代价高于残留（下次 ApplyTags 重建）
+                            _logger.Warn(string.Format("跳过 RemoveItems：无有效句柄记录（当前 {0} 项）", _opcItems.Count));
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn("移除旧OPC标签失败: " + ex.Message);
+                    }
                 }
 
+                NormalizeTags(newTags);
                 // 引用替换（读侧 GetTags 直接返回，无需锁）
                 _tags = newTags;
 
