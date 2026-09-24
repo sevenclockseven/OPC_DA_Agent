@@ -160,8 +160,9 @@ type TaskRunner struct {
 	expected          map[string]struct{}
 	expectedErr       string
 	lastExpectedFetch time.Time
-	windowSeen        map[string]struct{}
-	windowStart       time.Time
+	windowSeen map[string]struct{}
+	windowStart time.Time
+	statReadyAt time.Time // 期望集就绪预热截止：此前窗口只报读到数、不判定缺失
 }
 
 func NewCollector(config *AppConfig) *Collector {
@@ -365,6 +366,9 @@ func (tr *TaskRunner) runSse(ctx context.Context, collector *Collector, client *
 			if strings.HasPrefix(line, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 				if payload != "" {
+					// 长连接期间唯一周期点：不挂这里则期望集只在连接建立时刷一次，
+					// C# 增删标签后统计口径冻结到断线重连/重启为止
+					tr.maybeRefreshExpected(client)
 					tr.handleSsePayload(collector, payload)
 				}
 			}
@@ -492,16 +496,25 @@ func (tr *TaskRunner) refreshExpected(client *HttpClient) error {
 		next[key] = struct{}{}
 	}
 	tr.statMu.Lock()
+	// 集合新增 key 时给 20 秒预热：C# 保存后新订阅项要等 AddItems+初值+首个快照
+	// 才会进流，此时段判定缺失必然是误报（"增删标签后先看到一串未读到"）
+	for k := range next {
+		if _, ok := tr.expected[k]; !ok {
+			tr.statReadyAt = time.Now().Add(20 * time.Second)
+			break
+		}
+	}
 	tr.expected = next
 	tr.statMu.Unlock()
 	return nil
 }
 
-// maybeRefreshExpected 懒刷新：成功 5 分钟一次，失败 1 分钟后重试；
-// 同一错误只 Warn 一次（复用 ruleErr 的去重模式，防黑洞地址刷屏）
+// maybeRefreshExpected 懒刷新：成功 30 秒一次，失败 15 秒后重试；
+// 同一错误只 Warn 一次（复用 ruleErr 的去重模式，防黑洞地址刷屏）。
+// 30 秒是"增删标签后无需重启即可感知"与请求频率的平衡：/api/tags 是本地轻量接口
 func (tr *TaskRunner) maybeRefreshExpected(client *HttpClient) {
 	tr.statMu.Lock()
-	if time.Since(tr.lastExpectedFetch) < 5*time.Minute {
+	if time.Since(tr.lastExpectedFetch) < 30*time.Second {
 		tr.statMu.Unlock()
 		return
 	}
@@ -511,11 +524,11 @@ func (tr *TaskRunner) maybeRefreshExpected(client *HttpClient) {
 		tr.statMu.Lock()
 		sameErr := err.Error() == tr.expectedErr
 		tr.expectedErr = err.Error()
-		// lastExpectedFetch 回拨 4 分钟 = 失败后 1 分钟重试
-		tr.lastExpectedFetch = time.Now().Add(-4 * time.Minute)
+		// lastExpectedFetch 回拨 15 秒 = 失败后 15 秒重试（30s 节流 - 15s 回拨）
+		tr.lastExpectedFetch = time.Now().Add(-15 * time.Second)
 		tr.statMu.Unlock()
 		if !sameErr {
-			log.Printf("批次质量期望集拉取失败（1分钟后重试）: %v", err)
+			log.Printf("批次质量期望集拉取失败（15秒后重试）: %v", err)
 		}
 		return
 	}
@@ -557,6 +570,12 @@ func (tr *TaskRunner) noteBatch(rawData []map[string]interface{}) {
 
 	if len(expected) == 0 {
 		log.Printf("📊 批次质量 [%s] 近10s: 读到 %d 个不同key（期望集未获取）", label, len(seen))
+		return
+	}
+	// 预热期内只报读到数不判定缺失：期望集刚刷新（含启动首次）时，
+	// 新增 key 尚未进流（订阅建立/初值/快照各需时间），缺失名单全是误报
+	if now.Before(tr.statReadyAt) {
+		log.Printf("📊 批次质量 [%s] 预热中（新期望集 20s 内不判定缺失）: 读到 %d/%d", label, len(seen), len(expected))
 		return
 	}
 	var missing []string
@@ -601,7 +620,7 @@ func (tr *TaskRunner) collectData(collector *Collector) {
 	var rawData []map[string]interface{}
 	httpClients, _, _ := collector.snapshot()
 
-	// 期望集懒刷新（成功 5 分钟/失败 1 分钟周期），与数据拉取解耦：
+	// 期望集懒刷新（成功 30 秒/失败 15 秒周期），与数据拉取解耦：
 	// 拉取失败不影响采集，仅统计日志分母缺失
 	if tr.task.HttpSource != "" {
 		for _, client := range httpClients {
