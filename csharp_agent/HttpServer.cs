@@ -400,7 +400,10 @@ namespace OPC_DA_Agent
         {
             try
             {
-                using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                // JSON 默认按 UTF-8 解码：Content-Type 无 charset 时 HttpListenerRequest.ContentEncoding
+                // 会落到系统 ANSI（中文 Windows 为 GBK），浏览器 JSON.stringify 的 UTF-8 body 会被解错，
+                // 中文 ItemID 在入内存/tags.json 前就已变乱码
+                using (var reader = new StreamReader(request.InputStream, new UTF8Encoding(false)))
                 {
                     string body = reader.ReadToEnd();
                     var tagReq = JsonConvert.DeserializeObject<SaveTagsRequest>(body);
