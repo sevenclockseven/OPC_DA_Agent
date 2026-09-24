@@ -456,6 +456,13 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
                 <label>自定义格式模板</label>
                 <textarea id="custom_format" name="custom_format" rows="3" placeholder="例如: {key},{value},{quality},{timestamp}"></textarea>
             </div>
+            <div class="form-group">
+                <label>调试日志（每批打印发送内容）</label>
+                <select id="debug" name="debug">
+                    <option value="false">关闭</option>
+                    <option value="true">开启</option>
+                </select>
+            </div>
 
             <button type="button" onclick="saveRtdb()">💾 保存配置</button>
             <button type="button" class="test" onclick="testRtdb()">🧪 测试连接</button>
@@ -473,6 +480,7 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('enabled').value = rtdb.enabled?.toString() || 'false';
                 document.getElementById('host').value = rtdb.host || '';
                 document.getElementById('port').value = rtdb.port || '';
+                document.getElementById('debug').value = rtdb.debug?.toString() || 'false';
                 const format = rtdb.format || '{key},{value},{quality},{timestamp}';
                 if (format === '{key},{value},{quality},{timestamp}') {
                     document.getElementById('format').value = '{key},{value},{quality},{timestamp}';
@@ -495,7 +503,8 @@ func (ws *WebServer) handleRtdbPage(w http.ResponseWriter, r *http.Request) {
                 enabled: document.getElementById('enabled').value === 'true',
                 host: document.getElementById('host').value,
                 port: parseInt(document.getElementById('port').value) || 0,
-                format: format
+                format: format,
+                debug: document.getElementById('debug').value === 'true'
             };
 
             const response = await fetch('/api/config', {
@@ -1737,6 +1746,9 @@ func (ws *WebServer) updateConfigFromMap(config *AppConfig, updates map[string]i
 		}
 		if format, ok := rtdbData["format"].(string); ok {
 			config.RtdbConfig.Format = format
+		}
+		if debug, ok := rtdbData["debug"].(bool); ok {
+			config.RtdbConfig.Debug = debug
 		}
 	}
 

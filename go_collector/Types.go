@@ -41,6 +41,8 @@ type RtdbConfig struct {
 	Host    string `json:"host" ini:"host"`
 	Port    int    `json:"port" ini:"port"`
 	Format  string `json:"format" ini:"format"`
+	// Debug 开启后每批打印实际发送的行内容（排查时间戳/格式用，高频刷屏慎开）
+	Debug bool `json:"debug" ini:"debug"`
 }
 
 type WebhookConfig struct {

@@ -132,6 +132,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 		config.RtdbConfig.Host = section.Key("host").String()
 		config.RtdbConfig.Port, _ = section.Key("port").Int()
 		config.RtdbConfig.Format = section.Key("format").String()
+		config.RtdbConfig.Debug, _ = section.Key("debug").Bool()
 	}
 
 	if section := cfg.Section("webhook"); section != nil {
@@ -263,6 +264,7 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 		section.NewKey("host", config.RtdbConfig.Host)
 		section.NewKey("port", fmt.Sprintf("%d", config.RtdbConfig.Port))
 		section.NewKey("format", config.RtdbConfig.Format)
+		section.NewKey("debug", fmt.Sprintf("%v", config.RtdbConfig.Debug))
 	}
 
 	if config.WebhookConfig != nil {

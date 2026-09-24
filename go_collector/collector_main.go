@@ -807,6 +807,10 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	var batchSent int64
 	var lastErr error
 
+	// 整批渲染进单个缓冲：KairosDB telnet 行协议天然支持一次写多行，
+	// 669 标签原先每批 669 次 Write 系统调用，批量化后每地址仅 1 次
+	var buf strings.Builder
+	lineCount := 0
 	for key, value := range values {
 		line, ok := c.formatLine(key, value, metadata[key])
 		if !ok {
@@ -815,27 +819,33 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 			}
 			continue
 		}
-		data := []byte(line + "\n")
-		lineSent := false
-		for i, conn := range c.conns {
-			if _, err := conn.Write(data); err != nil {
-				failCounts[i]++
-				lastErr = err
-				continue
-			}
-			lineSent = true
-		}
-		// 双写语义：单地址写失败不中断本批，继续向其余地址投递后续行
-		if !lineSent {
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+		lineCount++
+	}
+	if lineCount == 0 {
+		return nil
+	}
+
+	if c.config.Debug {
+		log.Printf("🔍 RTDB debug [%s] 本批 %d 行:\n%s", source, lineCount, buf.String())
+	}
+
+	// 双写语义：整批写单地址，单地址失败不影响其余地址；sentAny=任一地址成功即本批有效
+	data := []byte(buf.String())
+	for i, conn := range c.conns {
+		if _, err := conn.Write(data); err != nil {
+			failCounts[i]++
+			lastErr = err
 			continue
 		}
 		sentAny = true
-		batchSent++
+		batchSent += int64(lineCount)
 	}
 
 	for i, n := range failCounts {
 		if n > 0 && i < len(c.addrs) {
-			log.Printf("⚠️ RTDB[%s] 本批 %d 行写入失败", c.addrs[i], n)
+			log.Printf("⚠️ RTDB[%s] 本批 %d 行写入失败", c.addrs[i], lineCount)
 		}
 	}
 	if !sentAny {
