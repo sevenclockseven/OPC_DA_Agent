@@ -1,14 +1,14 @@
 package main
 
 type AppConfig struct {
-	Title         string           `json:"title" ini:"title"`
-	OpcServer     string           `json:"opc_server" ini:"opc_server"`
-	WebToken      string           `json:"web_token,omitempty" ini:"web_token"`
-	HttpConfigs   []*HttpConfig    `json:"http_configs,omitempty"`
-	MqttConfig    *MqttConfig      `json:"mqtt,omitempty"`
-	RtdbConfig    *RtdbConfig      `json:"rtdb,omitempty"`
-	WebhookConfig *WebhookConfig   `json:"webhook,omitempty"`
-	Tasks         []*TaskConfig    `json:"tasks,omitempty"`
+	Title         string         `json:"title" ini:"title"`
+	OpcServer     string         `json:"opc_server" ini:"opc_server"`
+	WebToken      string         `json:"web_token,omitempty" ini:"web_token"`
+	HttpConfigs   []*HttpConfig  `json:"http_configs,omitempty"`
+	MqttConfig    *MqttConfig    `json:"mqtt,omitempty"`
+	RtdbConfig    *RtdbConfig    `json:"rtdb,omitempty"`
+	WebhookConfig *WebhookConfig `json:"webhook,omitempty"`
+	Tasks         []*TaskConfig  `json:"tasks,omitempty"`
 }
 
 type HttpConfig struct {
@@ -22,18 +22,18 @@ type HttpConfig struct {
 }
 
 type MqttConfig struct {
-	Enabled   bool   `json:"enabled" ini:"enabled"`
-	Broker    string `json:"broker" ini:"broker"`
-	Port      int    `json:"port" ini:"port"`
-	Topic     string `json:"topic" ini:"topic"`
-	Username  string `json:"username,omitempty" ini:"username"`
-	Password  string `json:"password,omitempty" ini:"password"`
-	ClientId  string `json:"client_id" ini:"client_id"`
-	Qos       int    `json:"qos" ini:"qos"`
-	Retain    bool   `json:"retain" ini:"retain"`
-	Format    string `json:"format" ini:"format"`
+	Enabled     bool   `json:"enabled" ini:"enabled"`
+	Broker      string `json:"broker" ini:"broker"`
+	Port        int    `json:"port" ini:"port"`
+	Topic       string `json:"topic" ini:"topic"`
+	Username    string `json:"username,omitempty" ini:"username"`
+	Password    string `json:"password,omitempty" ini:"password"`
+	ClientId    string `json:"client_id" ini:"client_id"`
+	Qos         int    `json:"qos" ini:"qos"`
+	Retain      bool   `json:"retain" ini:"retain"`
+	Format      string `json:"format" ini:"format"`
 	JsTransform string `json:"js_transform" ini:"js_transform"`
-	Split     bool   `json:"split" ini:"split"`
+	Split       bool   `json:"split" ini:"split"`
 	// TlsEnabled true 时用 ssl:// 连接（通常 8883）；false/缺省保持 tcp:// 旧行为
 	TlsEnabled bool `json:"tls_enabled" ini:"tls_enabled"`
 	// TlsInsecureSkipVerify 跳过证书校验（现场自签证书应急）；生产应保持 false

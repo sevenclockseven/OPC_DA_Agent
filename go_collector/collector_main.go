@@ -229,9 +229,9 @@ type TaskRunner struct {
 	expected          map[string]struct{}
 	expectedErr       string
 	lastExpectedFetch time.Time
-	windowSeen map[string]struct{}
-	windowStart time.Time
-	statReadyAt time.Time // 期望集就绪预热截止：此前窗口只报读到数、不判定缺失
+	windowSeen        map[string]struct{}
+	windowStart       time.Time
+	statReadyAt       time.Time // 期望集就绪预热截止：此前窗口只报读到数、不判定缺失
 
 	// 最近一次 10s 窗口结算快照，供 Web /api/tasks/stats 展示（statMu 保护）
 	statUpdatedAt   time.Time
@@ -584,7 +584,7 @@ func minDuration(a, b time.Duration) time.Duration {
 
 // refreshExpected 拉取 C# 代理 GET /api/tags 刷新期望集合；
 // key 口径 item_id||node_id||name 与 C# 前端 tagKey 一致，仅 enabled||active 计入
-//（与 C# ApplyTags 订阅口径相同），保证"期望=代理页面可见标签"同一事实来源
+// （与 C# ApplyTags 订阅口径相同），保证"期望=代理页面可见标签"同一事实来源
 func (tr *TaskRunner) refreshExpected(client *HttpClient) error {
 	u, err := url.Parse(client.config.Url)
 	if err != nil {

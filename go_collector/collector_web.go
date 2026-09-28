@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/mux"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/gorilla/mux"
 )
 
 type WebServer struct {
