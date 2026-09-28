@@ -352,10 +352,12 @@ func (c *Collector) Start() error {
 		if c.config.RtdbConfig.Host != "" && c.config.RtdbConfig.Port > 0 {
 			c.rtdbClient = NewRtdbClient(c.config.RtdbConfig)
 			if err := c.rtdbClient.Connect(); err != nil {
-				log.Printf("⚠️ RTDB连接失败: %v", err)
+				// 首连失败不拖死进程：看门狗按 rtdbReconnectInterval 后台补拨，恢复前 Send 跳过
+				log.Printf("⚠️ RTDB连接失败（后台自动重试，恢复前不发送）: %v", err)
 			} else {
 				fmt.Println("✓ RTDB连接成功")
 			}
+			c.rtdbClient.StartAutoReconnect(ctx)
 		} else {
 			log.Println("⚠️ RTDB已启用但地址未配置，跳过连接")
 		}
@@ -897,13 +899,20 @@ func (tr *TaskRunner) processAndPublish(collector *Collector, rawData []map[stri
 	}
 }
 
+// rtdbReconnectInterval 断线看门狗节拍：补齐 addresses 中未连通的目标，
+// 语义对齐 MQTT 侧 paho AutoReconnect/ConnectRetry 的后台重试
+const rtdbReconnectInterval = 10 * time.Second
+
 type RtdbClient struct {
-	config    *RtdbConfig
-	connected bool
-	// conns/addrs 双写目标：Host 支持逗号分隔多个地址，同 format 同批写入；
-	// 部分地址不可达时保留可用连接继续发送（冗余双写），全部不可达才视为未连接
-	conns []net.Conn
-	addrs []string
+	config *RtdbConfig
+
+	// mu 串行化 targets/conns/addrs/closed：多个 TaskRunner 并发 Send 读快照，
+	// 看门狗 dialMissing 补拨与写失败 dropConn 改写连接集，无锁会 data race
+	mu      sync.Mutex
+	targets []string // Host 解析后的全部目标地址，看门狗按此补齐
+	conns   []net.Conn
+	addrs   []string
+	closed  bool // Disconnect 置位：阻止锁外 dial 完成后回写造成的连接泄漏
 
 	shortKeySkipped atomic.Bool // 前缀解析跳过告警只打一次，防止逐 tick 刷屏
 
@@ -919,11 +928,8 @@ func NewRtdbClient(config *RtdbConfig) *RtdbClient {
 	}
 }
 
-func (c *RtdbClient) Connect() error {
-	if c.config.Host == "" || c.config.Port == 0 {
-		return fmt.Errorf("RTDB地址或端口未配置")
-	}
-
+// parseTargets 把 Host（支持逗号分隔多地址）解析为 host:port 列表。
+func (c *RtdbClient) parseTargets() []string {
 	var targets []string
 	for _, h := range strings.Split(c.config.Host, ",") {
 		h = strings.TrimSpace(h)
@@ -931,53 +937,145 @@ func (c *RtdbClient) Connect() error {
 			targets = append(targets, fmt.Sprintf("%s:%d", h, c.config.Port))
 		}
 	}
+	return targets
+}
+
+func (c *RtdbClient) Connect() error {
+	if c.config.Host == "" || c.config.Port == 0 {
+		return fmt.Errorf("RTDB地址或端口未配置")
+	}
+	targets := c.parseTargets()
 	if len(targets) == 0 {
 		return fmt.Errorf("RTDB地址或端口未配置")
 	}
 
-	c.conns = nil
-	c.addrs = nil
-	var failed []string
-	for _, addr := range targets {
-		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %v", addr, err))
-			log.Printf("⚠️ RTDB %s 连接失败: %v（继续尝试其余地址）", addr, err)
-			continue
-		}
-		c.conns = append(c.conns, conn)
-		c.addrs = append(c.addrs, addr)
-		log.Printf("✅ RTDB已连接到 %s", addr)
-	}
+	c.mu.Lock()
+	c.targets = targets
+	c.mu.Unlock()
 
-	if len(c.conns) == 0 {
+	failed := c.dialMissing()
+	if !c.IsConnected() {
 		return fmt.Errorf("连接RTDB失败: %s", strings.Join(failed, "; "))
 	}
-	c.connected = true
 	c.lastSummaryNano.Store(time.Now().UnixNano())
 	return nil
 }
 
+// dialMissing 增量补齐 targets 中尚未连通的地址：已有活连接不动（双写场景不打断可用链路），
+// 锁外拨号、锁内回写，避免 5s DialTimeout 阻塞并发 Send。返回本轮拨号失败的地址描述。
+func (c *RtdbClient) dialMissing() []string {
+	c.mu.Lock()
+	targets := append([]string(nil), c.targets...)
+	have := make(map[string]bool, len(c.addrs))
+	for _, a := range c.addrs {
+		have[a] = true
+	}
+	c.mu.Unlock()
+
+	var failed []string
+	for _, addr := range targets {
+		if have[addr] {
+			continue
+		}
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", addr, err))
+			log.Printf("⚠️ RTDB %s 连接失败: %v", addr, err)
+			continue
+		}
+		c.mu.Lock()
+		if c.closed { // Disconnect 已发生：丢弃锁外拨出的连接，防泄漏
+			c.mu.Unlock()
+			conn.Close()
+			return failed
+		}
+		c.conns = append(c.conns, conn)
+		c.addrs = append(c.addrs, addr)
+		c.mu.Unlock()
+		log.Printf("✅ RTDB已连接到 %s", addr)
+	}
+	return failed
+}
+
+// StartAutoReconnect 启动断线看门狗：按 rtdbReconnectInterval 补拨缺失地址，
+// 首连失败/服务端重启闪断后自动恢复，期间 Send 因 IsConnected()==false 跳过。
+func (c *RtdbClient) StartAutoReconnect(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(rtdbReconnectInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				c.dialMissing() // 无缺失时锁内比对后直接返回，开销可忽略
+			}
+		}
+	}()
+}
+
 // Disconnect 幂等：未连接/重复调用直接返回，防止 defer 与 Stop 双关时误报日志。
 func (c *RtdbClient) Disconnect() {
-	if len(c.conns) == 0 {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
 		return
 	}
-	for _, conn := range c.conns {
-		conn.Close()
-	}
+	c.closed = true
+	conns := c.conns
+	had := len(conns) > 0
 	c.conns = nil
 	c.addrs = nil
-	c.connected = false
-	log.Printf("📴 RTDB已断开（累计发送 %d 条）", c.sentTotal.Load())
+	c.mu.Unlock()
+
+	for _, conn := range conns {
+		conn.Close()
+	}
+	if had {
+		log.Printf("📴 RTDB已断开（累计发送 %d 条）", c.sentTotal.Load())
+	}
 }
 
 func (c *RtdbClient) IsConnected() bool {
-	return c.connected && len(c.conns) > 0
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.closed && len(c.conns) > 0
+}
+
+// dropConn 关闭写失败的连接并从活跃集移除；按 conn 指针匹配，两个并发 Send
+// 同时剔除同一连接时后到者找不到目标，天然幂等。全部断开时打一次边沿日志。
+func (c *RtdbClient) dropConn(conn net.Conn) {
+	c.mu.Lock()
+	removed := false
+	for i, cc := range c.conns {
+		if cc == conn {
+			c.conns = append(c.conns[:i], c.conns[i+1:]...)
+			c.addrs = append(c.addrs[:i], c.addrs[i+1:]...)
+			removed = true
+			break
+		}
+	}
+	empty := len(c.conns) == 0
+	sent := c.sentTotal.Load()
+	c.mu.Unlock()
+
+	if !removed {
+		return
+	}
+	conn.Close()
+	if empty {
+		log.Printf("⚠️ RTDB全部地址断开（累计发送 %d 条），看门狗将每 %v 自动重连", sent, rtdbReconnectInterval)
+	}
 }
 
 func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
-	if !c.IsConnected() {
+	// 锁内取快照后即解锁：Write 是毫秒级系统调用，持锁会串行化多 TaskRunner 并发 Send；
+	// 快照期间连接集可能被看门狗/其他 Send 改写，Write 失败后按 conn 指针幂等剔除
+	c.mu.Lock()
+	conns := append([]net.Conn(nil), c.conns...)
+	addrs := append([]string(nil), c.addrs...)
+	c.mu.Unlock()
+	if len(conns) == 0 {
 		return fmt.Errorf("RTDB未连接")
 	}
 
@@ -987,10 +1085,10 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 	}
 
 	metadata, _ := message["metadata"].(map[string]map[string]interface{})
-	failCounts := make([]int, len(c.conns))
 	sentAny := false
 	var batchSent int64
 	var lastErr error
+	var failed []net.Conn
 
 	// 整批渲染进单个缓冲：KairosDB telnet 行协议天然支持一次写多行，
 	// 669 标签原先每批 669 次 Write 系统调用，批量化后每地址仅 1 次
@@ -1018,23 +1116,27 @@ func (c *RtdbClient) Send(message map[string]interface{}, source string) error {
 
 	// 双写语义：整批写单地址，单地址失败不影响其余地址；sentAny=任一地址成功即本批有效
 	data := []byte(buf.String())
-	for i, conn := range c.conns {
+	for i, conn := range conns {
 		if _, err := conn.Write(data); err != nil {
-			failCounts[i]++
 			lastErr = err
+			failed = append(failed, conn)
+			if i < len(addrs) {
+				log.Printf("⚠️ RTDB[%s] 本批 %d 行写入失败: %v", addrs[i], lineCount, err)
+			}
 			continue
 		}
 		sentAny = true
 		batchSent += int64(lineCount)
 	}
 
-	for i, n := range failCounts {
-		if n > 0 && i < len(c.addrs) {
-			log.Printf("⚠️ RTDB[%s] 本批 %d 行写入失败", c.addrs[i], lineCount)
-		}
+	// 写失败的连接按 TCP 语义视为已死：剔除并 Close，看门狗随后补拨，
+	// 否则 IsConnected 恒 true 会无限往死连接重写、永不恢复（本次修复的根因）
+	for _, conn := range failed {
+		c.dropConn(conn)
 	}
+
 	if !sentAny {
-		return fmt.Errorf("发送数据失败: 全部 %d 个地址均不可写（最后错误: %v）", len(c.conns), lastErr)
+		return fmt.Errorf("发送数据失败: 全部 %d 个地址均不可写（最后错误: %v）", len(conns), lastErr)
 	}
 
 	c.sentTotal.Add(batchSent)
