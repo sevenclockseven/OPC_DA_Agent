@@ -146,6 +146,8 @@ Web UI: `http://<ip>:9090/`
 
 ### collector.ini（Go 采集器）
 
+完整键说明模板见 [`go_collector/collector.example.ini`](go_collector/collector.example.ini)（随仓库更新；现场的 `collector.ini` 不入库）。示例：
+
 ```ini
 [main]
 title=采集系统
