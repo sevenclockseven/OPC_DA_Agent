@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,8 +39,17 @@ func NewWebServer(configPath string, collector *Collector) *WebServer {
 // Start 启动Web服务器
 func (ws *WebServer) Start(port int) error {
 	ws.webPort = port
+	bind := ""
 	if cfg := ws.configManager.Load(ws.configPath); cfg != nil {
 		ws.webToken.Store(cfg.WebToken)
+		bind = cfg.WebBind
+	}
+	if tok, _ := ws.webToken.Load().(string); tok == "" {
+		// 默认零破坏不拒启，但不许静默裸奔：空令牌=同网段任意主机可改配置/触发外连
+		log.Printf("⚠️ web_token未设置：任何能访问本端口的主机均可查看并修改配置、触发对外连接。建议 [main] web_bind=127.0.0.1 限定来源，并配置 web_token（openssl rand -hex 32）")
+	}
+	if bind == "" {
+		bind = "0.0.0.0"
 	}
 
 	r := mux.NewRouter()
@@ -73,8 +83,12 @@ func (ws *WebServer) Start(port int) error {
 	r.HandleFunc("/api/tasks/stats", ws.handleTaskStats).Methods("GET")
 	r.HandleFunc("/api/logs", ws.handleLogs).Methods("GET")
 
-	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Web服务器启动在 http://localhost%s\n", addr)
+	addr := fmt.Sprintf("%s:%d", bind, port)
+	displayHost := bind
+	if bind == "0.0.0.0" || bind == "::" {
+		displayHost = "localhost"
+	}
+	fmt.Printf("Web服务器启动在 http://%s:%d\n", displayHost, port)
 	// 显式超时：ReadHeaderTimeout 防 Slowloris 慢头攻击，Read/Write/Idle 限制僵尸连接占坑
 	srv := &http.Server{
 		Addr:              addr,

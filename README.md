@@ -151,6 +151,7 @@ Web UI: `http://<ip>:9090/`
 title=采集系统
 opc_server=Freelance2000OPCServer.42.1
 web_token=
+web_bind=
 
 [mqtt]
 enabled=True
@@ -189,6 +190,7 @@ MQTT 输出格式（`[mqtt]` 段）：
 
 - 数据源 URL 默认 `http://172.16.32.98:8080/api/stream`（SSE）。采集器检测到 URL 含 `/api/stream` 时走 SSE 长轮询 + 指数退避断线重连；否则按原 HTTP 轮询。
 - `web_token`（`[main]` 段，可选）：Web UI / API 访问令牌，空 = 不启用（默认）。清空该键并保存即关闭鉴权。可在 Web UI「设置」中通过 `POST /api/config` 热更新（请求需携带旧令牌）。
+- `web_bind`（`[main]` 段，可选）：Web 监听地址，空 = `0.0.0.0` 全网卡（默认，兼容旧配置）。仅本机/管理机访问采集器时建议设 `127.0.0.1` 或内网管理 IP，**仅重启生效**。未设置 `web_token` 时启动会打安全警告。
 
 ## 安全 / API 认证
 

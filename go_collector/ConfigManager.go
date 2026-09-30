@@ -71,6 +71,7 @@ func (cm *ConfigManager) LoadIni(path string) *AppConfig {
 			config.OpcServer = section.Key("opc_host").String()
 		}
 		config.WebToken = section.Key("web_token").String()
+		config.WebBind = section.Key("web_bind").String()
 	}
 
 	// 解析多个HTTP数据源配置 (http1, http2, ...)
@@ -230,6 +231,10 @@ func (cm *ConfigManager) SaveIni(path string, config *AppConfig) error {
 	if config.WebToken != "" {
 		section.NewKey("web_token", config.WebToken)
 	}
+	// web_bind 同 web_token：空=默认0.0.0.0 不写键，保持旧配置形态
+	if config.WebBind != "" {
+		section.NewKey("web_bind", config.WebBind)
+	}
 
 	if config.MqttConfig != nil {
 		section = cfg.Section("mqtt")
@@ -318,6 +323,9 @@ func (cm *ConfigManager) ToIniString(config *AppConfig) string {
 	section.NewKey("opc_server", config.OpcServer)
 	if config.WebToken != "" {
 		section.NewKey("web_token", config.WebToken)
+	}
+	if config.WebBind != "" {
+		section.NewKey("web_bind", config.WebBind)
 	}
 
 	if config.MqttConfig != nil {

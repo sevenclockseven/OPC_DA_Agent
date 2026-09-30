@@ -191,6 +191,8 @@ tag_dbn9=20251_M4202_CDBH
 | `opc_server` | string | OPC服务器名称 | KEPware.KEPServerEx.V4 |
 | `opc_mode` | string | OPC模式 | open |
 | `opc_sync` | bool | 同步模式 | True |
+| `web_token` | string | Web/API 访问令牌，空=不启用鉴权 | （`openssl rand -hex 32`） |
+| `web_bind` | string | Web 监听地址，空=0.0.0.0 全网卡；仅重启生效 | 127.0.0.1 |
 
 ### [remote] 远程配置
 

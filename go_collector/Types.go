@@ -1,9 +1,11 @@
 package main
 
 type AppConfig struct {
-	Title         string         `json:"title" ini:"title"`
-	OpcServer     string         `json:"opc_server" ini:"opc_server"`
-	WebToken      string         `json:"web_token,omitempty" ini:"web_token"`
+	Title     string `json:"title" ini:"title"`
+	OpcServer string `json:"opc_server" ini:"opc_server"`
+	WebToken  string `json:"web_token,omitempty" ini:"web_token"`
+	// WebBind 监听地址：空=0.0.0.0（全网卡，兼容旧配置）；建议管理机场景设 127.0.0.1 或内网管理IP，仅重启生效
+	WebBind       string         `json:"web_bind,omitempty" ini:"web_bind"`
 	HttpConfigs   []*HttpConfig  `json:"http_configs,omitempty"`
 	MqttConfig    *MqttConfig    `json:"mqtt,omitempty"`
 	RtdbConfig    *RtdbConfig    `json:"rtdb,omitempty"`
